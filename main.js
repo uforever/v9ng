@@ -26,8 +26,13 @@ const asyncCode = inputConfig.readCode(projName, "async"); // async
 const logCode = `/* VM Logs Code */
 (function () {
     v9ng.toolsFunc.saveLog = function (args) {
-        fs.appendFileSync("${logFileName}", \`
+        if (args.length === 1 && typeof args[0] === 'string') {
+            fs.appendFileSync("${logFileName}", \`
+\${(args[0])}\`);
+        } else {
+            fs.appendFileSync("${logFileName}", \`
 \${v9ng.toolsFunc.commToString(args)}\`);
+        }
     };
 })();
 `;
@@ -55,6 +60,7 @@ ${inputCode}
 ${asyncCode}
 `;
 
+console.log("---- START ----");
 const vm = new VM({
     sandbox: {
         fs,

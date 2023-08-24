@@ -1,6 +1,14 @@
 (function () { // window
     delete global;
     delete Buffer;
+    delete process;
+    delete clearImmediate;
+    delete setImmediate;
+    delete SharedArrayBuffer;
+    delete $jsDebugIsRegistered;
+    delete fs;
+    // delete VM2_INTERNAL_STATE_DO_NOT_USE_OR_PROGRAM_WILL_FAIL;
+    delete globalThis[Symbol.toStringTag];
     delete WindowProperties;
     window = globalThis;
     Object.setPrototypeOf(window, Window.prototype);
@@ -51,4 +59,21 @@
             return v9ng.toolsFunc.funcDispatch(this, "window", "self_set", arguments);
         },
     });
+    v9ng.toolsFunc.defineProperty(window, "setTimeout", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "setTimeout", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "clearTimeout", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "clearTimeout", arguments);
+        },
+    });
+    eval = v9ng.toolsFunc.funcHook(eval, undefined, false, v9ng.toolsFunc.noopFunc, v9ng.toolsFunc.noopFunc);
 })();

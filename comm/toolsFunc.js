@@ -92,29 +92,29 @@
             }
 
             const dataType = typeof data;
+            const dataProto = Object.prototype.toString.call(data);
             if (dataType === 'object' && data instanceof Object) {
                 if (Array.isArray(data)) {
-                    let result = "[";
+                    let result = [];
                     for (const element of data) {
-                        result += v9ng.toolsFunc.commToString(element);
-                        result += ",";
+                        result.push(v9ng.toolsFunc.commToString(element));
                     }
-                    result += "]";
-                    return result;
-                } else if (Object.prototype.toString.call(data) === '[object Arguments]') {
+                    return '[' + result.join(',') + ']';
+                } else if (dataProto === '[object Arguments]') {
                     let result = [];
                     for (let i = 0; i < data.length; i++) {
                         result.push(v9ng.toolsFunc.commToString(data[i]));
                     }
                     return result.join(' ');
+                } else if (v9ng.cache.recursiveLogImmune.includes(dataProto)) {
+                    return `{${dataProto}}`;
                 } else {
                     const propKeys = Reflect.ownKeys(data);
-                    let result = "{";
+                    let result = [];
                     for (const prop of propKeys) {
-                        result += `${v9ng.toolsFunc.commToString(prop)}:${v9ng.toolsFunc.commToString(data[prop])},`;
+                        result.push(`${v9ng.toolsFunc.commToString(prop)}:${v9ng.toolsFunc.commToString(data[prop])}`);
                     }
-                    result += "}";
-                    return result;
+                    return '{' + result.join(',') + '}';
                 }
             }
 
@@ -138,12 +138,79 @@
         };
     })();
 
+    (function () { // throwError
+        v9ng.toolsFunc.throwError = function (name, message) {
+            let e = new Error();
+            e.name = name;
+            e.message = message;
+            e.stack = `${name}: ${message}
+    at snippet://`;
+            throw e;
+        };
+    })();
+
+    (function () { // styleLog
+        v9ng.toolsFunc.styleLog = function (styleName, message) {
+            const styles = {
+                // text color
+                'black': '\x1b[30m',
+                'red': '\x1b[31m',
+                'green': '\x1b[32m',
+                'yellow': '\x1b[33m',
+                'blue': '\x1b[34m',
+                'magenta': '\x1b[35m',
+                'cyan': '\x1b[36m',
+                'white': '\x1b[37m',
+                'gray': '\x1b[90m',
+                'brightRed': '\x1b[91m',
+                'brightGreen': '\x1b[92m',
+                'brightYellow': '\x1b[93m',
+                'brightBlue': '\x1b[94m',
+                'brightMagenta': '\x1b[95m',
+                'brightCyan': '\x1b[96m',
+                'brightWhite': '\x1b[97m',
+
+                // background color
+                'bgBlack': '\x1b[40m',
+                'bgRed': '\x1b[41m',
+                'bgGreen': '\x1b[42m',
+                'bgYellow': '\x1b[43m',
+                'bgBlue': '\x1b[44m',
+                'bgMagenta': '\x1b[45m',
+                'bgCyan': '\x1b[46m',
+                'bgWhite': '\x1b[47m',
+                'bgGray': '\x1b[100m',
+                'bgBrightRed': '\x1b[101m',
+                'bgBrightGreen': '\x1b[102m',
+                'bgBrightYellow': '\x1b[103m',
+                'bgBrightBlue': '\x1b[104m',
+                'bgBrightMagenta': '\x1b[105m',
+                'bgBrightCyan': '\x1b[106m',
+                'bgBrightWhite': '\x1b[107m',
+
+                // other style
+                'reset': '\x1b[0m',         // reset / default
+                'bold': '\x1b[1m',          // bold
+                'dim': '\x1b[2m',           // dim
+                'italic': '\x1b[3m',        // italic
+                'underline': '\x1b[4m',     // underline
+                'inverse': '\x1b[7m',       // inverse
+                'hidden': '\x1b[8m',        // hidden
+                'strikethrough': '\x1b[9m',  // strikethrough
+            };
+            if (!styles[styleName]) {
+                v9ng.toolsFunc.throwError('StyleError', 'Illegal style');
+            }
+            console.log(`${styles[styleName]}${message}${styles.reset}`);
+        };
+    })();
+
     (function () { // noopFunc
         v9ng.toolsFunc.noopFunc = function () { };
     })();
 
     (function () { // objProxy
-        v9ng.toolsFunc.objProxy = function (obj, objName) {
+        v9ng.toolsFunc.objProxy = function (obj, objName) { // objName is used only for logging
             if (!v9ng.config.enableProxy) {
                 return obj;
             }
@@ -160,15 +227,15 @@
                     }
                     try {
                         if (result instanceof Object) {
-                            console.log('\x1b[32m%s\x1b[0m', `[GET PROP]: \`${objName}[${prop.toString()}]\`
+                            v9ng.toolsFunc.styleLog('green', `[GET PROP]: \`${objName}[${prop.toString()}]\`
 [TYPE]: ${Object.prototype.toString.call(result)}`);
                             result = v9ng.toolsFunc.objProxy(result, `${objName}.${prop.toString()}`);
                         } else {
-                            console.log('\x1b[32m%s\x1b[0m', `[GET PROP]: \`${objName}[${prop.toString()}]\`
+                            v9ng.toolsFunc.styleLog('green', `[GET PROP]: \`${objName}[${prop.toString()}]\`
 [VALUE]: \`${result}\``);
                         }
                     } catch (e) {
-                        console.log('\x1b[31m%s\x1b[0m', `[GET PROP]: \`${objName}[${prop.toString()}]\`
+                        v9ng.toolsFunc.styleLog('red', `[GET PROP]: \`${objName}[${prop.toString()}]\`
 [ERROR]: ${e.message}`);
                     }
                     return result;
@@ -176,15 +243,14 @@
                 set: function (target, prop, value, reciver) {
                     try {
                         if (value instanceof Object) {
-                            console.log('\x1b[33m%s\x1b[0m', `[SET PROP]: \`${objName}[${prop.toString()}]\`
+                            v9ng.toolsFunc.styleLog('yellow', `[SET PROP]: \`${objName}[${prop.toString()}]\`
 [TYPE]: ${Object.prototype.toString.call(value)}`);
-                            // TODO: detailed value
                         } else {
-                            console.log('\x1b[33m%s\x1b[0m', `[SET PROP]: \`${objName}[${prop.toString()}]\`
+                            v9ng.toolsFunc.styleLog('yellow', `[SET PROP]: \`${objName}[${prop.toString()}]\`
 [VALUE]: \`${value}\``);
                         }
                     } catch (e) {
-                        console.log('\x1b[31m%s\x1b[0m', `[SET PROP]: \`${objName}[${prop.toString()}]\`
+                        v9ng.toolsFunc.styleLog('red', `[SET PROP]: \`${objName}[${prop.toString()}]\`
 [ERROR]: ${e.message}`);
                     }
                     return Reflect.set(target, prop, value, reciver);
@@ -193,7 +259,7 @@
                     let result = Reflect.getOwnPropertyDescriptor(target, prop);
                     try {
                         if (prop !== 'constructor') {
-                            console.log('\x1b[35m%s\x1b[0m', `[GET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
+                            v9ng.toolsFunc.styleLog('magenta', `[GET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
 [TYPE]: ${Object.prototype.toString.call(result)}`);
                         }
                         // optional
@@ -201,17 +267,17 @@
                         //     result = v9ng.toolsFunc.objProxy(result, `${objName}.${prop.toString()}.PropertyDescriptor`);
                         // }
                     } catch (e) {
-                        console.log('\x1b[31m%s\x1b[0m', `[GET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
+                        v9ng.toolsFunc.styleLog('red', `[GET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
 [ERROR]: ${e.message}`);
                     }
                     return result;
                 },
                 defineProperty: function (target, prop, descriptor) {
                     try {
-                        console.log('\x1b[35m%s\x1b[0m', `[SET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
+                        v9ng.toolsFunc.styleLog('magenta', `[SET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
 [VALUE]: \`${descriptor.value}\``);
                     } catch (e) {
-                        console.log('\x1b[31m%s\x1b[0m', `[SET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
+                        v9ng.toolsFunc.styleLog('red', `[SET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
 [ERROR]: ${e.message}`);
                     }
                     return Reflect.defineProperty(target, prop, descriptor);
@@ -219,22 +285,21 @@
                 apply: function (target, thisArg, args) {
                     let result = Reflect.apply(target, thisArg, args);
                     try {
-                        // TODO: add args log
-                        if (result instanceof Object) {
-                            console.log('\x1b[34m%s\x1b[0m', `[FUNC APPLY]: \`${objName}\`
-[ARGS]: \`${v9ng.toolsFunc.commToString(args)}\`
-[RESULT TYPE]: ${Object.prototype.toString.call(result)}`);
-                        } else if (typeof result === 'symbol') {
-                            console.log('\x1b[34m%s\x1b[0m', `[FUNC APPLY]: \`${objName}\`
+                        if (typeof result === 'symbol') {
+                            v9ng.toolsFunc.styleLog('blue', `[FUNC APPLY]: \`${objName}\`
 [ARGS]: \`${v9ng.toolsFunc.commToString(args)}\`
 [RESULT]: ${result.toString()}`);
+                        } else if (typeof result === 'object') {
+                            v9ng.toolsFunc.styleLog('blue', `[FUNC APPLY]: \`${objName}\`
+[ARGS]: \`${v9ng.toolsFunc.commToString(args)}\`
+[RESULT TYPE]: ${Object.prototype.toString.call(result)}`);
                         } else {
-                            console.log('\x1b[34m%s\x1b[0m', `[FUNC APPLY]: \`${objName}\`
+                            v9ng.toolsFunc.styleLog('blue', `[FUNC APPLY]: \`${objName}\`
 [ARGS]: \`${v9ng.toolsFunc.commToString(args)}\`
 [RESULT]: ${result}`);
                         }
                     } catch (e) {
-                        console.log('\x1b[31m%s\x1b[0m', `[FUNC APPLY]: \`${objName}\`
+                        v9ng.toolsFunc.styleLog('red', `[FUNC APPLY]: \`${objName}\`
 [ARGS]: \`${v9ng.toolsFunc.commToString(args)}\`
 [ERROR]: ${e.message}`);
                     }
@@ -364,17 +429,6 @@
         };
     })();
 
-    (function () { // throwError
-        v9ng.toolsFunc.throwError = function (name, message) {
-            let e = new Error();
-            e.name = name;
-            e.message = message;
-            e.stack = `${name}: ${message}
-    at snippet://`;
-            throw e;
-        };
-    })();
-
     (function () { // defineProperty
         v9ng.toolsFunc.defineProperty = function (obj, prop, originDescriptor) {
             let targetDescriptor = {};
@@ -419,7 +473,7 @@
                 return v9ng.envmtImpl[totalName].apply(self, args);
             } catch (e) {
                 if (defaultRet === undefined) {
-                    console.log('\x1b[31m%s\x1b[0m', `[FUNC DISPATCH]: \`${totalName}\`
+                    v9ng.toolsFunc.styleLog('red', `[FUNC DISPATCH]: \`${totalName}\`
 [ERROR]: ${e.message}`);
                 }
                 return defaultRet;
@@ -442,13 +496,13 @@
             }
             if (!onEnter) {
                 onEnter = function (obj) {
-                    console.log('\x1b[34m%s\x1b[0m', `[FUNC START]: \`${funcInfo.objName}\`->\`${funcInfo.funcName}\`
+                    v9ng.toolsFunc.styleLog('blue', `[FUNC START]: \`${funcInfo.objName}\`->\`${funcInfo.funcName}\`
 [ARGS]: \`${v9ng.toolsFunc.commToString(obj.args)}\``);
                 }
             }
             if (!onLeave) {
                 onLeave = function (obj) {
-                    console.log('\x1b[34m%s\x1b[0m', `[FUNC END]: \`${funcInfo.objName}\`->\`${funcInfo.funcName}\`
+                    v9ng.toolsFunc.styleLog('blue', `[FUNC END]: \`${funcInfo.objName}\`->\`${funcInfo.funcName}\`
 [RETURN]: \`${v9ng.toolsFunc.commToString(obj.result)}\``);
                 }
             }
@@ -474,6 +528,206 @@
             v9ng.toolsFunc.funcNaturalize(targetFunc, funcInfo.funcName);
             v9ng.toolsFunc.funcRename(targetFunc, funcInfo.funcName)
             return targetFunc;
+        };
+    })();
+
+    (function () { // createProxyObj
+        v9ng.toolsFunc.createProxyObj = function (obj, ctor, name) {
+            Object.setPrototypeOf(obj, ctor.prototype);
+            return v9ng.toolsFunc.objProxy(obj, name);
+        };
+    })();
+
+    (function () { // setProtoProp
+        v9ng.toolsFunc.setProtoProp = function (key, value) {
+            if (!(v9ng.cache.protoPropSymbol in this)) {
+                Object.defineProperty(this, v9ng.cache.protoPropSymbol, {
+                    enumerable: false,
+                    configurable: false,
+                    writable: true,
+                    value: {},
+                });
+            }
+            this[v9ng.cache.protoPropSymbol][key] = value;
+            return value;
+        };
+    })();
+
+    (function () { // getProtoProp
+        v9ng.toolsFunc.getProtoProp = function (key) {
+            return this[v9ng.cache.protoPropSymbol] && this[v9ng.cache.protoPropSymbol][key];
+        };
+    })();
+
+    (function () { // getElements
+        v9ng.toolsFunc.getElements = function (tagType) {
+            let result = [];
+            for (const tag of v9ng.cache.htmlElements) {
+                if (Object.prototype.toString.call(tag) === tagType) {
+                    result.push(tag);
+                }
+            }
+            return result;
+        };
+    })();
+
+    (function () { // parseSingleTag
+        v9ng.toolsFunc.parseSingleTag = function (tagStr) {
+            let arrList = tagStr.match("<(.*?)>")[1].split(" ");
+            let tagJson = {};
+            tagJson["type"] = arrList[0];
+            tagJson["props"] = {};
+            for (let i = 1; i < arrList.length; i++) {
+                let item = arrList[i].split("=");
+                let key = item[0];
+                let value = item[1].replaceAll("\"", "").replaceAll("'", "");
+                tagJson["props"][key] = value;
+            }
+            return tagJson;
+        };
+    })();
+
+    (function () { // parseUrl
+        v9ng.toolsFunc.parseUrl = function (str) {
+            const options = {
+                strictMode: false,
+                key: ["href", "protocol", "host", "userInfo", "user", "password", "hostname", "port", "relative", "pathname", "directory", "file", "search", "hash"],
+                q: {
+                    name: "queryKey",
+                    parser: /(?:^|&)([^&=]*)=?([^&]*)/g
+                },
+                parser: {
+                    strict: /^(?:([^:\/?#]+):)?(?:\/\/((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?))?((((?:[^?#\/]*\/)*)([^?#]*))(?:\?([^#]*))?(?:#(.*))?)/,
+                    loose: /^(?:(?![^:@]+:[^:@\/]*@)([^:\/?#.]+):)?(?:\/\/)?((?:(([^:@]*)(?::([^:@]*))?)?@)?([^:\/?#]*)(?::(\d*))?)(((\/(?:[^?#](?![^?#\/]*\.[^?#\/.]+(?:[?#]|$)))*\/?)?([^?#\/]*))(?:\?([^#]*))?(?:#(.*))?)/
+                }
+            };
+            if (!str) {
+                return '';
+            }
+            var o = options,
+                m = o.parser[o.strictMode ? "strict" : "loose"].exec(str),
+                urlJson = {},
+                i = 14;
+            while (i--) urlJson[o.key[i]] = m[i] || "";
+            urlJson[o.q.name] = {};
+            urlJson[o.key[12]].replace(o.q.parser, function ($0, $1, $2) {
+                if ($1) urlJson[o.q.name][$1] = $2;
+            });
+            delete urlJson["queryKey"];
+            delete urlJson["userInfo"];
+            delete urlJson["user"];
+            delete urlJson["password"];
+            delete urlJson["relative"];
+            delete urlJson["directory"];
+            delete urlJson["file"];
+            urlJson["protocol"] += ":";
+            urlJson["origin"] = urlJson["protocol"] + "//" + urlJson["host"];
+            urlJson["search"] = urlJson["search"] && "?" + urlJson["search"];
+            urlJson["hash"] = urlJson["hash"] && "#" + urlJson["hash"];
+            return urlJson;
+        };
+    })();
+
+    (function () { // createMimeTypeArray
+        v9ng.toolsFunc.createMimeTypeArray = function () {
+            let mimeTypeArray = {};
+            mimeTypeArray = v9ng.toolsFunc.createProxyObj(mimeTypeArray, MimeTypeArray, "mimeTypeArray");
+            v9ng.toolsFunc.setProtoProp.call(mimeTypeArray, "length", 0);
+            return mimeTypeArray;
+        };
+    })();
+
+    (function () { // addMimeType
+        v9ng.toolsFunc.addMimeType = function (mimeType) {
+            let mimeTypeArray = v9ng.cache.mimeTypeArray;
+            if (mimeTypeArray === undefined) {
+                mimeTypeArray = v9ng.toolsFunc.createMimeTypeArray();
+            }
+            const currentIndex = mimeTypeArray.length;
+            let flag = true;
+            for (let i = 0; i < currentIndex; i++) {
+                if (mimeTypeArray[i].type === mimeType.type) {
+                    flag = false;
+                }
+            }
+            if (flag) {
+                mimeTypeArray[currentIndex] = mimeType;
+                Object.defineProperty(mimeTypeArray, mimeType.type, {
+                    configurable: true,
+                    enumerable: false,
+                    writable: false,
+                    value: mimeType,
+                });
+                v9ng.toolsFunc.setProtoProp.call(mimeTypeArray, "length", currentIndex + 1);
+            }
+            v9ng.cache.mimeTypeArray = mimeTypeArray;
+            return mimeTypeArray;
+        };
+    })();
+
+    (function () { // createMimeType
+        v9ng.toolsFunc.createMimeType = function (mimeTypeJson, plugin) {
+            let mimeType = {};
+            mimeType = v9ng.toolsFunc.createProxyObj(mimeType, MimeType, "mimeType");
+            v9ng.toolsFunc.setProtoProp.call(mimeType, "description", mimeTypeJson.description);
+            v9ng.toolsFunc.setProtoProp.call(mimeType, "suffixes", mimeTypeJson.suffixes);
+            v9ng.toolsFunc.setProtoProp.call(mimeType, "type", mimeTypeJson.type);
+            v9ng.toolsFunc.setProtoProp.call(mimeType, "enabledPlugin", plugin);
+            v9ng.toolsFunc.addMimeType(mimeType);
+            return mimeType;
+        };
+    })();
+
+    (function () { // createPluginArray
+        v9ng.toolsFunc.createPluginArray = function () {
+            let pluginArray = {};
+            pluginArray = v9ng.toolsFunc.createProxyObj(pluginArray, PluginArray, "pluginArray");
+            v9ng.toolsFunc.setProtoProp.call(pluginArray, "length", 0);
+            return pluginArray;
+        };
+    })();
+
+    (function () { // addPlugin
+        v9ng.toolsFunc.addPlugin = function (plugin) {
+            let pluginArray = v9ng.cache.pluginArray;
+            if (pluginArray === undefined) {
+                pluginArray = v9ng.toolsFunc.createPluginArray();
+            }
+            const currentIndex = pluginArray.length;
+            pluginArray[currentIndex] = plugin;
+            Object.defineProperty(pluginArray, plugin.name, {
+                configurable: true,
+                enumerable: false,
+                writable: false,
+                value: plugin,
+            });
+            v9ng.toolsFunc.setProtoProp.call(pluginArray, "length", currentIndex + 1);
+            v9ng.cache.pluginArray = pluginArray;
+            return pluginArray;
+        };
+    })();
+
+    (function () { // createPlugin
+        v9ng.toolsFunc.createPlugin = function (data) {
+            const mimeTypes = data.mimeTypes;
+            let plugin = {};
+            plugin = v9ng.toolsFunc.createProxyObj(plugin, Plugin, "plugin");
+            v9ng.toolsFunc.setProtoProp.call(plugin, "description", data.description);
+            v9ng.toolsFunc.setProtoProp.call(plugin, "filename", data.filename);
+            v9ng.toolsFunc.setProtoProp.call(plugin, "name", data.name);
+            v9ng.toolsFunc.setProtoProp.call(plugin, "length", mimeTypes.length);
+            for (let i = 0; i < mimeTypes.length; i++) {
+                let mimeType = v9ng.toolsFunc.createMimeType(mimeTypes[i], plugin);
+                plugin[i] = mimeType;
+                Object.defineProperty(plugin, mimeTypes[i].type, {
+                    configurable: true,
+                    enumerable: false,
+                    writable: false,
+                    value: mimeType,
+                });
+            }
+            v9ng.toolsFunc.addPlugin(plugin);
+            return plugin;
         };
     })();
 })();

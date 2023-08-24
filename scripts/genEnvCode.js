@@ -94,7 +94,7 @@ genCtorCode = function (ctor, instance) {
         new ctor;
     } catch (e) {
         code += `
-        return v9ng.toolsFunc.throwError('${e.name}', '${e.message}');`
+        return v9ng.toolsFunc.throwError('${e.name}', "${e.message}");`
     }
     code += `
     };

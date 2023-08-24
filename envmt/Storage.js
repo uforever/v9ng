@@ -56,3 +56,7 @@
     localStorage = {};
     Object.setPrototypeOf(localStorage, Storage.prototype);
 })();
+(function () { // sessionStorage
+    sessionStorage = {};
+    Object.setPrototypeOf(sessionStorage, Storage.prototype);
+})();

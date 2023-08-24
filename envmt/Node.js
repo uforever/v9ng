@@ -116,7 +116,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nodeType_get", arguments, 9);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nodeType_get", arguments);
         },
         set: undefined,
     });
@@ -124,7 +124,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nodeName_get", arguments, "#document");
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nodeName_get", arguments);
         },
         set: undefined,
     });
@@ -132,7 +132,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "baseURI_get", arguments, "chrome://new-tab-page/");
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "baseURI_get", arguments);
         },
         set: undefined,
     });
@@ -140,7 +140,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "isConnected_get", arguments, true);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "isConnected_get", arguments);
         },
         set: undefined,
     });
@@ -148,7 +148,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "ownerDocument_get", arguments, null);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "ownerDocument_get", arguments);
         },
         set: undefined,
     });
@@ -156,7 +156,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "parentNode_get", arguments, null);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "parentNode_get", arguments);
         },
         set: undefined,
     });
@@ -164,7 +164,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "parentElement_get", arguments, null);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "parentElement_get", arguments);
         },
         set: undefined,
     });
@@ -196,7 +196,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "previousSibling_get", arguments, null);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "previousSibling_get", arguments);
         },
         set: undefined,
     });
@@ -204,7 +204,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nextSibling_get", arguments, null);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nextSibling_get", arguments);
         },
         set: undefined,
     });
@@ -212,7 +212,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nodeValue_get", arguments, null);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nodeValue_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "nodeValue_set", arguments);
@@ -222,7 +222,7 @@
         configurable: true,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "textContent_get", arguments, null);
+            return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "textContent_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "Node.prototype", "textContent_set", arguments);

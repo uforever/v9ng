@@ -27,7 +27,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "href_get", arguments, "chrome://new-tab-page/");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "href_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "href_set", arguments);
@@ -37,7 +37,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "origin_get", arguments, "chrome://new-tab-page");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "origin_get", arguments);
         },
         set: undefined,
     });
@@ -45,7 +45,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "protocol_get", arguments, "chrome:");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "protocol_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "protocol_set", arguments);
@@ -55,7 +55,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "host_get", arguments, "new-tab-page");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "host_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "host_set", arguments);
@@ -65,7 +65,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "hostname_get", arguments, "new-tab-page");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "hostname_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "hostname_set", arguments);
@@ -75,7 +75,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "port_get", arguments, "");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "port_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "port_set", arguments);
@@ -85,7 +85,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "pathname_get", arguments, "/");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "pathname_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "pathname_set", arguments);
@@ -95,7 +95,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "search_get", arguments, "");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "search_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "search_set", arguments);
@@ -105,7 +105,7 @@
         configurable: false,
         enumerable: true,
         get: function () {
-            return v9ng.toolsFunc.funcDispatch(this, "location", "hash_get", arguments, "");
+            return v9ng.toolsFunc.funcDispatch(this, "location", "hash_get", arguments);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "hash_set", arguments);
