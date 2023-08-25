@@ -6,7 +6,7 @@
         "toolsFunc": {},
         "envmtImpl": {},
     };
-    v9ng.config.enableProxy = false;
+    v9ng.config.enableProxy = true;
     v9ng.config.printLog = true;
     v9ng.config.saveLog = false;
     v9ng.cache.nativeSymbol = Symbol('native');
@@ -20,6 +20,7 @@
         '[object WebGLBuffer]',
         '[object WebGLProgram]',
         '[object HTMLDivElement]',
+        '[object HTMLMetaElement]',
     ];
     v9ng.cache.htmlElements = [];
     v9ng.cache.cookie = {};

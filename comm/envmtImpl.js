@@ -11,8 +11,7 @@
     v9ng.envmtImpl.document$location_get = function () {
         return location;
     };
-    v9ng.envmtImpl.Document_prototype$all_get = function () {
-        // TODO
+    v9ng.envmtImpl.Document_prototype$all_get = function () { // TODO
     };
     v9ng.envmtImpl.Document_prototype$body_get = function () {
         let collection = v9ng.toolsFunc.getElements('[object HTMLBodyElement]');
@@ -30,10 +29,7 @@
         return result.join('; ');
     };
     v9ng.envmtImpl.Document_prototype$cookie_set = function (content) {
-        const index = content.indexOf(';');
-        if (index !== -1) {
-            content = content.substring(0, index);
-        }
+        content = content.split(';')[0];
         if (content.indexOf('=') === -1) {
             v9ng.cache.cookie[""] = content.trim();
         } else {
@@ -44,59 +40,62 @@
         }
     };
     v9ng.envmtImpl.Document_prototype$createElement = function (tagName) {
-        const tagType = tagName.toLowerCase();
+        const tagType = tagName.toUpperCase();
         let tag = {};
         switch (tagType) {
-            case "a":
+            case "A":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLAnchorElement, 'HTMLAnchorElement');
                 v9ng.cache.htmlElements.push(tag);
                 break;
-            case "body":
+            case "BODY":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLBodyElement, 'HTMLBodyElement');
                 v9ng.cache.htmlElements.push(tag);
                 break;
-            case "canvas":
+            case "CANVAS":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLCanvasElement, 'HTMLCanvasElement');
                 v9ng.cache.htmlElements.push(tag);
                 break;
-            case "div":
+            case "DIV":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLDivElement, 'HTMLDivElement');
                 v9ng.cache.htmlElements.push(tag);
                 break;
-            case "head":
+            case "HEAD":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLHeadElement, 'HTMLHeadElement');
                 v9ng.cache.htmlElements.push(tag);
                 break;
-            case "input":
+            case "INPUT":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLInputElement, 'HTMLInputElement');
                 v9ng.cache.htmlElements.push(tag);
                 break;
-            case "meta":
+            case "META":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLMetaElement, 'HTMLMetaElement');
                 v9ng.cache.htmlElements.push(tag);
                 break;
-            case "span":
+            case "SCRIPT":
+                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLScriptElement, 'HTMLScriptElement');
+                v9ng.cache.htmlElements.push(tag);
+                break;
+            case "SPAN":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLSpanElement, 'HTMLSpanElement');
                 v9ng.cache.htmlElements.push(tag);
                 break;
+            case "I":
+                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLElement, 'HTMLElement');
+                v9ng.cache.htmlElements.push(tag);
+                break;
             default:
+                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLElement, 'HTMLElement');
                 v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$createElement("${tagName}")`);
                 break;
         }
+        v9ng.toolsFunc.setProtoProp.call(tag, "tagName", tagType);
+        console.log(tag, tag.tagName);
         return tag;
     };
     v9ng.envmtImpl.Document_prototype$getElementsByTagName = function (tagName) {
-        const tagType = tagName.toLowerCase();
-        let result = [];
-        switch (tagType) {
-            case "meta":
-                result = v9ng.toolsFunc.getElements('[object HTMLMetaElement]');
-                break;
-            default:
-                v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$getElementsByTagName("${tagName}")`);
-                break;
-        }
-        return result;
+        const tagType = tagName.toUpperCase();
+        return v9ng.toolsFunc.getElements(tagType);
+        // v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$getElementsByTagName("${tagName}")`);
     };
     v9ng.envmtImpl.Document_prototype$getElementById = function (tagId) {
         for (const tag of v9ng.cache.htmlElements) {
@@ -105,6 +104,9 @@
             }
         }
         return null;
+    };
+    v9ng.envmtImpl.Document_prototype$scripts_get = function () {
+        return document.getElementsByTagName("script");
     };
     v9ng.envmtImpl.Document_prototype$write = function (content) {
         const singleTag = v9ng.toolsFunc.parseSingleTag(content);
@@ -120,6 +122,12 @@
     v9ng.envmtImpl.Element_prototype$children_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "children");
     };
+    v9ng.envmtImpl.Element_prototype$getElementsByTagName = function (tagName) {
+        const tagType = tagName.toUpperCase();
+        return v9ng.toolsFunc.getElements(tagType, this);
+        // v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Element_prototype$getElementsByTagName("${tagName}")`);
+
+    };
     v9ng.envmtImpl.Element_prototype$id_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "id");
     };
@@ -127,6 +135,9 @@
         return v9ng.toolsFunc.setProtoProp.call(this, "id", value);
     };
     v9ng.envmtImpl.Element_prototype$innerHTML_set = v9ng.toolsFunc.noopFunc;
+    v9ng.envmtImpl.Element_prototype$tagName_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "tagName");
+    };
     v9ng.envmtImpl.Event_prototype$timeStamp_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "timeStamp");
     };
@@ -234,6 +245,24 @@
         }
         return style;
     };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$charset_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "charset");
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$charset_set = function (value) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "charset", value);
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$src_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "src");
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$src_set = function (value) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "src", value);
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$type_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "type");
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$type_set = function (value) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "type", value);
+    };
     v9ng.envmtImpl.HTMLMetaElement_prototype$content_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "content");
     };
@@ -303,7 +332,7 @@
         // TODO: fix and set parentNode
         let collection = [];
         collection.push(tag);
-        collection = v9ng.toolsFunc.createProxyObj(collection, HTMLCollection, "collection");
+        collection = v9ng.toolsFunc.createProxyObj(collection, HTMLCollection, "HTMLCollection");
         v9ng.toolsFunc.setProtoProp.call(this, "children", collection);
         return tag;
     };

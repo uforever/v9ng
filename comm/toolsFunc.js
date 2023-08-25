@@ -560,13 +560,24 @@
     })();
 
     (function () { // getElements
-        v9ng.toolsFunc.getElements = function (tagType) {
+        v9ng.toolsFunc.getElements = function (tagType, rootNode) {
             let result = [];
             for (const tag of v9ng.cache.htmlElements) {
-                if (Object.prototype.toString.call(tag) === tagType) {
-                    result.push(tag);
+                if (tag.tagName === tagType) {
+                    if (rootNode === undefined) {
+                        result.push(tag);
+                    } else {
+                        let parentTag = tag.parentNode;
+                        while(parentTag) {
+                            if (parentTag === rootNode) {
+                                result.push(tag);
+                            }
+                            parentTag = parentTag.parentNode;
+                        }
+                    }
                 }
             }
+            result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "HTMLCollection");
             return result;
         };
     })();

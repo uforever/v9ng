@@ -6,7 +6,7 @@ const commConfig = require("./config/comm.config.js"); // comm
 const envmtConfig = require("./config/envmt.config.js"); // envmt
 const inputConfig = require("./config/input.config.js"); // input
 
-const projName = "demoProj";
+const projName = "rs4";
 
 const outputFileName = `./output/${projName}.js`;
 const logFileName = `./output/${projName}.log`;
