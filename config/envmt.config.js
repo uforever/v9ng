@@ -26,21 +26,64 @@ ${code}`;
     return result;
 }
 
+function readEvents() {
+    let result = `// ---- Events BEGIN ----`;
+    try {
+        const fileList = fs.readdirSync('./envmt/Events');
+        for (const fileName of fileList) {
+            const code = fs.readFileSync(`./envmt/Events/${fileName}`);
+            result += `
+${code}`;
+        }
+    } catch (e) {
+        console.log("[DOESN'T EXIST]: ./envmt/Events/");
+    }
+    result += `
+// ---- Events END ----`;
+    return result;
+}
+
 function readCode() {
     return `/* Environment Code */
 (function () {
 ${readFile("EventTarget")}
 ${readFile("WindowProperties")}
 ${readFile("Window")}
+${readFile("Screen")}
+${readFile("ScreenOrientation")}
 ${readFile("Node")}
 ${readFile("Element")}
 ${readFile("HTMLElement")}
 ${readHTMLElements()}
+${readFile("HTMLAudioElement")}
+${readFile("HTMLVideoElement")}
+${readFile("Audio")}
+${readFile("SVGElement")}
+${readFile("SVGGraphicsElement")}
+${readFile("SVGPatternElement")}
 ${readFile("Document")}
 ${readFile("HTMLDocument")}
+${readFile("CharacterData")}
+${readFile("Text")}
+${readFile("CDATASection")}
 ${readFile("Storage")}
 ${readFile("Navigator")}
 ${readFile("Location")}
+${readFile("Request")}
+${readFile("PaymentResponse")}
+${readFile("Notification")}
+${readFile("SourceBuffer")}
+${readFile("External")}
+${readFile("chrome")}
+${readFile("History")}
+${readFile("Performance")}
+${readFile("SpeechSynthesisUtterance")}
+${readFile("TextTrackList")}
+${readFile("IDBFactory")}
+${readFile("IDBRequest")}
+${readFile("IDBOpenDBRequest")}
+${readFile("IDBDatabase")}
+${readFile("NetworkInformation")}
 ${readFile("HTMLCollection")}
 ${readFile("MimeType")}
 ${readFile("MimeTypeArray")}
@@ -48,6 +91,10 @@ ${readFile("Plugin")}
 ${readFile("PluginArray")}
 ${readFile("CSSStyleDeclaration")}
 ${readFile("CanvasRenderingContext2D")}
+${readFile("OffscreenCanvasRenderingContext2D")}
+${readFile("Path2D")}
+${readFile("PerformanceEntry")}
+${readFile("PerformancePaintTiming")}
 ${readFile("WebGLRenderingContext")}
 ${readFile("WebGLBuffer")}
 ${readFile("WebGLProgram")}
@@ -55,8 +102,9 @@ ${readFile("XMLHttpRequestEventTarget")}
 ${readFile("XMLHttpRequest")}
 ${readFile("BatteryManager")}
 ${readFile("Event")}
-${readFile("UIEvent")}
+${readEvents()}
 ${readFile("MouseEvent")}
+${readFile("DOMParser")}
 ${readFile("globalThis")}
 })();
 `;

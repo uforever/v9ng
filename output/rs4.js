@@ -9,31 +9,44 @@
     };
     v9ng.config.enableProxy = true;
     v9ng.config.printLog = true;
-    v9ng.config.saveLog = false;
+    v9ng.config.saveLog = true;
+    v9ng.cache.fs = fs;
     v9ng.cache.nativeSymbol = Symbol('native');
     v9ng.cache.proxySymbol = Symbol('proxy');
+    v9ng.cache.domSymbol = Symbol('dom');
+    v9ng.cache.ptrSymbol = Symbol('ptr');
     v9ng.cache.protoPropSymbol = Symbol('protoProp');
     v9ng.cache.proxyImmune = [
-        v9ng.cache.proxySymbol,
         "eval",
+        Symbol.toPrimitive,
+        Symbol.iterator,
+        v9ng.cache.nativeSymbol,
+        v9ng.cache.proxySymbol,
+        v9ng.cache.domSymbol,
+        v9ng.cache.ptrSymbol,
+        v9ng.cache.protoPropSymbol,
     ];
-    v9ng.cache.recursiveLogImmune = [
+    v9ng.cache.recursiveImmuneObj = [
+        '[object HTMLCollection]',
         '[object WebGLBuffer]',
         '[object WebGLProgram]',
         '[object HTMLDivElement]',
+        '[object HTMLMetaElement]',
+        '[object HTMLScriptElement]',
     ];
-    v9ng.cache.htmlElements = [];
+    v9ng.cache.recursiveImmuneProp = [
+        v9ng.cache.nativeSymbol,
+        v9ng.cache.proxySymbol,
+        v9ng.cache.domSymbol,
+        v9ng.cache.ptrSymbol,
+        v9ng.cache.protoPropSymbol,
+    ];
     v9ng.cache.cookie = {};
-    v9ng.cache.fontList = [
-        "SimHei",
-        "SimSun",
-        "NSimSun",
-        "FangSong",
-        "KaiTi",
-    ];
-    v9ng.cache.timeFuncCursor = 0;
-    v9ng.cache.timeoutEvents = [];
-    v9ng.cache.promiseEvents = [];
+    v9ng.cache.fontList = ['Arial', 'Courier New', 'FangSong', 'Georgia', 'Helvetica Neue LT Pro 35 Thin', 'KaiTi', 'LG-FZKaTong-M19-V2.2', 'Microsoft Himalaya', 'NSimSun', 'SimHei', 'SimSun', 'Times New Roman', 'Verdana', 'arial', 'courier', 'courier new', 'cursive', 'fantasy', 'georgia', 'helvetica', 'monospace', 'serif', 'tahoma', 'times', 'times new roman', 'verdana'];
+    v9ng.cache.asyncEventCursor = 0;
+    v9ng.cache.asyncEvents = [];
+    v9ng.cache.callbackFuncs = [];
+    v9ng.cache.mouseEvents = [];
     v9ng.cache.listenEvents = {};
 })();
 
@@ -135,24 +148,32 @@
             const dataProto = Object.prototype.toString.call(data);
             if (dataType === 'object' && data instanceof Object) {
                 if (Array.isArray(data)) {
-                    let result = [];
-                    for (const element of data) {
-                        result.push(v9ng.toolsFunc.commToString(element));
+                    if (data[Symbol.iterator]) {
+                        let result = [];
+                        for (const element of data) {
+                            result.push(v9ng.toolsFunc.commToString(element));
+                        }
+                        return '[' + result.join(',') + ']';
+                    } else {
+                        return '[...]';
                     }
-                    return '[' + result.join(',') + ']';
                 } else if (dataProto === '[object Arguments]') {
                     let result = [];
                     for (let i = 0; i < data.length; i++) {
                         result.push(v9ng.toolsFunc.commToString(data[i]));
                     }
                     return result.join(' ');
-                } else if (v9ng.cache.recursiveLogImmune.includes(dataProto)) {
+                } else if (v9ng.cache.recursiveImmuneObj.includes(dataProto)) {
                     return `{${dataProto}}`;
                 } else {
                     const propKeys = Reflect.ownKeys(data);
                     let result = [];
                     for (const prop of propKeys) {
-                        result.push(`${v9ng.toolsFunc.commToString(prop)}:${v9ng.toolsFunc.commToString(data[prop])}`);
+                        if (v9ng.cache.recursiveImmuneProp.includes(prop)) {
+                            result.push(`${v9ng.toolsFunc.commToString(prop)}:{${v9ng.toolsFunc.commToString(Object.prototype.toString.call(data[prop]))}}`);
+                        } else {
+                            result.push(`${v9ng.toolsFunc.commToString(prop)}:${v9ng.toolsFunc.commToString(data[prop])}`);
+                        }
                     }
                     return '{' + result.join(',') + '}';
                 }
@@ -266,7 +287,10 @@
                         return result;
                     }
                     try {
-                        if (result instanceof Object) {
+                        if (result === undefined) {
+                            v9ng.toolsFunc.styleLog('red', `[GET PROP]: \`${objName}[${prop.toString()}]\`
+[VALUE]: undefined`);
+                        } else if (result instanceof Object) {
                             v9ng.toolsFunc.styleLog('green', `[GET PROP]: \`${objName}[${prop.toString()}]\`
 [TYPE]: ${Object.prototype.toString.call(result)}`);
                             result = v9ng.toolsFunc.objProxy(result, `${objName}.${prop.toString()}`);
@@ -359,9 +383,15 @@
                 },
                 has: function (target, prop) {
                     let result = Reflect.has(target, prop);
-                    if (prop !== v9ng.cache.proxySymbol) {
-                        console.log(`[PROP EXIST]: \`${objName}[${prop.toString()}]\`
-[RESULT]: \`${result}\``);
+                    if (v9ng.cache.proxyImmune.indexOf(prop) !== -1) {
+                        return result;
+                    }
+                    if (result === false) {
+                        v9ng.toolsFunc.styleLog('red', `[PROP EXIST]: \`${objName}[${prop.toString()}]\`
+[RESULT]: false`);
+                    } else {
+                        v9ng.toolsFunc.styleLog('yellow', `[PROP EXIST]: \`${objName}[${prop.toString()}]\`
+[RESULT]: true`);
                     }
                     return result;
                 },
@@ -599,18 +629,6 @@
         };
     })();
 
-    (function () { // getElements
-        v9ng.toolsFunc.getElements = function (tagType) {
-            let result = [];
-            for (const tag of v9ng.cache.htmlElements) {
-                if (Object.prototype.toString.call(tag) === tagType) {
-                    result.push(tag);
-                }
-            }
-            return result;
-        };
-    })();
-
     (function () { // parseSingleTag
         v9ng.toolsFunc.parseSingleTag = function (tagStr) {
             let arrList = tagStr.match("<(.*?)>")[1].split(" ");
@@ -624,6 +642,26 @@
                 tagJson["props"][key] = value;
             }
             return tagJson;
+        };
+    })();
+
+    (function () { // genHtmlElement
+        v9ng.toolsFunc.genHtmlElement = function (domObj) {
+            const elementType = Object.prototype.toString.call(domObj).match(/^\[object\s(.*)\]$/)[1];
+            const htmlElement = v9ng.toolsFunc.createProxyObj({}, globalThis[elementType], elementType);
+            Object.defineProperty(domObj, v9ng.cache.ptrSymbol, {
+                configurable: false,
+                enumerable: false,
+                writable: false,
+                value: htmlElement,
+            });
+            Object.defineProperty(htmlElement, v9ng.cache.domSymbol, {
+                configurable: false,
+                enumerable: false,
+                writable: false,
+                value: domObj,
+            });
+            return htmlElement;
         };
     })();
 
@@ -670,8 +708,7 @@
 
     (function () { // createMimeTypeArray
         v9ng.toolsFunc.createMimeTypeArray = function () {
-            let mimeTypeArray = {};
-            mimeTypeArray = v9ng.toolsFunc.createProxyObj(mimeTypeArray, MimeTypeArray, "mimeTypeArray");
+            const mimeTypeArray = v9ng.toolsFunc.createProxyObj({}, MimeTypeArray, "mimeTypeArray");
             v9ng.toolsFunc.setProtoProp.call(mimeTypeArray, "length", 0);
             return mimeTypeArray;
         };
@@ -707,8 +744,7 @@
 
     (function () { // createMimeType
         v9ng.toolsFunc.createMimeType = function (mimeTypeJson, plugin) {
-            let mimeType = {};
-            mimeType = v9ng.toolsFunc.createProxyObj(mimeType, MimeType, "mimeType");
+            const mimeType = v9ng.toolsFunc.createProxyObj({}, MimeType, "mimeType");
             v9ng.toolsFunc.setProtoProp.call(mimeType, "description", mimeTypeJson.description);
             v9ng.toolsFunc.setProtoProp.call(mimeType, "suffixes", mimeTypeJson.suffixes);
             v9ng.toolsFunc.setProtoProp.call(mimeType, "type", mimeTypeJson.type);
@@ -720,8 +756,7 @@
 
     (function () { // createPluginArray
         v9ng.toolsFunc.createPluginArray = function () {
-            let pluginArray = {};
-            pluginArray = v9ng.toolsFunc.createProxyObj(pluginArray, PluginArray, "pluginArray");
+            const pluginArray = v9ng.toolsFunc.createProxyObj({}, PluginArray, "pluginArray");
             v9ng.toolsFunc.setProtoProp.call(pluginArray, "length", 0);
             return pluginArray;
         };
@@ -750,8 +785,7 @@
     (function () { // createPlugin
         v9ng.toolsFunc.createPlugin = function (data) {
             const mimeTypes = data.mimeTypes;
-            let plugin = {};
-            plugin = v9ng.toolsFunc.createProxyObj(plugin, Plugin, "plugin");
+            let plugin = v9ng.toolsFunc.createProxyObj({}, Plugin, "plugin");
             v9ng.toolsFunc.setProtoProp.call(plugin, "description", data.description);
             v9ng.toolsFunc.setProtoProp.call(plugin, "filename", data.filename);
             v9ng.toolsFunc.setProtoProp.call(plugin, "name", data.name);
@@ -781,131 +815,158 @@
     v9ng.envmtImpl.BatteryManager_prototype$level_get = function () {
         return 1;
     };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$arc = function (x, y, radius, startAngle, endAngle, anticlockwise) {
+        this[v9ng.cache.domSymbol].arc(x, y, radius, startAngle, endAngle, anticlockwise);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$beginPath = function () {
+        this[v9ng.cache.domSymbol].beginPath();
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$closePath = function () {
+        this[v9ng.cache.domSymbol].closePath();
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$fill = function () {
+        return this[v9ng.cache.domSymbol].fill.apply(this[v9ng.cache.domSymbol], arguments);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$fillRect = function (x, y, width, height) {
+        this[v9ng.cache.domSymbol].fillRect(x, y, width, height);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$fillStyle_set = function (value) {
+        return (this[v9ng.cache.domSymbol].fillStyle = value);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$fillText = function (text, x, y, maxWidth) {
+        this[v9ng.cache.domSymbol].fillText(text, x, y, maxWidth);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$font_set = function (value) {
+        return (this[v9ng.cache.domSymbol].font = value);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$globalCompositeOperation_set = function (value) {
+        return (this[v9ng.cache.domSymbol].globalCompositeOperation = value);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$isPointInPath = function () {
+        return this[v9ng.cache.domSymbol].isPointInPath.apply(this[v9ng.cache.domSymbol], arguments);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$rect = function (x, y, width, height) {
+        this[v9ng.cache.domSymbol].rect(x, y, width, height);
+    };
+    v9ng.envmtImpl.CanvasRenderingContext2D_prototype$textBaseline_set = function (value) {
+        return (this[v9ng.cache.domSymbol].textBaseline = value);
+    };
     v9ng.envmtImpl.document$location_get = function () {
         return location;
     };
-    v9ng.envmtImpl.Document_prototype$all_get = function () { // TODO
-    };
     v9ng.envmtImpl.Document_prototype$body_get = function () {
-        let collection = v9ng.toolsFunc.getElements('[object HTMLBodyElement]');
-        return collection[0];
+        const domObj = document[v9ng.cache.domSymbol].body;
+        if (domObj[v9ng.cache.ptrSymbol]) {
+            return domObj[v9ng.cache.ptrSymbol];
+        } else {
+            return v9ng.toolsFunc.genHtmlElement(domObj);
+        }
     };
     v9ng.envmtImpl.Document_prototype$cookie_get = function () {
-        let result = [];
-        for (const cookieKey in v9ng.cache.cookie) {
-            if (cookieKey === "") {
-                result.push(`${v9ng.cache.cookie[cookieKey]}`);
-            } else {
-                result.push(`${cookieKey}=${v9ng.cache.cookie[cookieKey]}`);
-            }
-        }
-        return result.join('; ');
+        return document[v9ng.cache.domSymbol].cookie;
     };
-    v9ng.envmtImpl.Document_prototype$cookie_set = function (content) {
-        content = content.split(';')[0];
-        if (content.indexOf('=') === -1) {
-            v9ng.cache.cookie[""] = content.trim();
-        } else {
-            const cookiePair = content.split('=');
-            const cookieKey = cookiePair[0].trim();
-            const cookieValue = cookiePair[1].trim();
-            v9ng.cache.cookie[cookieKey] = cookieValue;
-        }
+    v9ng.envmtImpl.Document_prototype$cookie_set = function (value) {
+        return (document[v9ng.cache.domSymbol].cookie = value);
     };
     v9ng.envmtImpl.Document_prototype$createElement = function (tagName) {
-        const tagType = tagName.toLowerCase();
-        let tag = {};
-        switch (tagType) {
-            case "a":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLAnchorElement, 'HTMLAnchorElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            case "body":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLBodyElement, 'HTMLBodyElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            case "canvas":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLCanvasElement, 'HTMLCanvasElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            case "div":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLDivElement, 'HTMLDivElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            case "head":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLHeadElement, 'HTMLHeadElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            case "input":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLInputElement, 'HTMLInputElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            case "meta":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLMetaElement, 'HTMLMetaElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            case "script":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLScriptElement, 'HTMLScriptElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            case "span":
-                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLSpanElement, 'HTMLSpanElement');
-                v9ng.cache.htmlElements.push(tag);
-                break;
-            default:
-                v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$createElement("${tagName}")`);
-                break;
+        const domObj = document[v9ng.cache.domSymbol].createElement(tagName);
+        return v9ng.toolsFunc.genHtmlElement(domObj);
+    };
+    v9ng.envmtImpl.Document_prototype$documentElement_get = function () {
+        const domObj = document[v9ng.cache.domSymbol].documentElement;
+        if (domObj[v9ng.cache.ptrSymbol]) {
+            return domObj[v9ng.cache.ptrSymbol];
+        } else {
+            return v9ng.toolsFunc.genHtmlElement(domObj);
         }
-        return tag;
     };
     v9ng.envmtImpl.Document_prototype$getElementsByTagName = function (tagName) {
-        const tagType = tagName.toLowerCase();
+        const elementsDom = document[v9ng.cache.domSymbol].getElementsByTagName(tagName);
         let result = [];
-        switch (tagType) {
-            case "meta":
-                result = v9ng.toolsFunc.getElements('[object HTMLMetaElement]');
-                break;
-            case "script":
-                result = v9ng.toolsFunc.getElements('[object HTMLScriptElement]');
-                break;
-            default:
-                v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$getElementsByTagName("${tagName}")`);
-                break;
+        for (const elementDom of elementsDom) {
+            if (elementDom[v9ng.cache.ptrSymbol]) {
+                result.push(elementDom[v9ng.cache.ptrSymbol]);
+            } else {
+                result.push(v9ng.toolsFunc.genHtmlElement(elementDom));
+            }
         }
+        result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "htmlCollection");
         return result;
     };
     v9ng.envmtImpl.Document_prototype$getElementById = function (tagId) {
-        for (const tag of v9ng.cache.htmlElements) {
-            if (tag.id === tagId) {
-                return tag;
-            }
+        const elementDom = document[v9ng.cache.domSymbol].getElementById(tagId);
+        if (elementDom === null) {
+            return null;
         }
-        return null;
+        if (elementDom[v9ng.cache.ptrSymbol]) {
+            return elementDom[v9ng.cache.ptrSymbol];
+        } else {
+            return v9ng.toolsFunc.genHtmlElement(elementDom);
+        }
     };
     v9ng.envmtImpl.Document_prototype$scripts_get = function () {
-        return document.getElementsByTagName("script");
-    };
-    v9ng.envmtImpl.Document_prototype$write = function (content) {
-        const singleTag = v9ng.toolsFunc.parseSingleTag(content);
-        let tag = document.createElement(singleTag.type);
-        for (const key in singleTag.props) {
-            const value = singleTag.props[key];
-            tag[key] = value;
-            if (tag[key] === undefined) {
-                v9ng.toolsFunc.setProtoProp.call(tag, key, value);
+        const elementsDom = document[v9ng.cache.domSymbol].scripts();
+        let result = [];
+        for (const elementDom of elementsDom) {
+            if (elementDom[v9ng.cache.ptrSymbol]) {
+                result.push(elementDom[v9ng.cache.ptrSymbol]);
+            } else {
+                result.push(v9ng.toolsFunc.genHtmlElement(elementDom));
             }
         }
+        result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "htmlCollection");
+        return result;
+    };
+    v9ng.envmtImpl.Document_prototype$scrollingElement_get = function () {
+        return document.documentElement;
+    };
+    v9ng.envmtImpl.Document_prototype$write = function (content) {
+        document[v9ng.cache.domSymbol].write(content);
     };
     v9ng.envmtImpl.Element_prototype$children_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "children");
+        const childrenDom = this[v9ng.cache.domSymbol]["children"];
+        let result = [];
+        for (const childDom of childrenDom) {
+            if (childDom[v9ng.cache.ptrSymbol]) {
+                result.push(childDom[v9ng.cache.ptrSymbol]);
+            } else {
+                result.push(v9ng.toolsFunc.genHtmlElement(childDom));
+            }
+        }
+        result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "htmlCollection");
+        return result;
+    };
+    v9ng.envmtImpl.Element_prototype$getAttribute = function (attributeName) {
+        return this[v9ng.cache.domSymbol].getAttribute(attributeName);
+    };
+    v9ng.envmtImpl.Element_prototype$getElementsByTagName = function (tagName) {
+        const elementsDom = this[v9ng.cache.domSymbol].getElementsByTagName(tagName);
+        let result = [];
+        for (const elementDom of elementsDom) {
+            if (elementDom[v9ng.cache.ptrSymbol]) {
+                result.push(elementDom[v9ng.cache.ptrSymbol]);
+            } else {
+                result.push(v9ng.toolsFunc.genHtmlElement(elementDom));
+            }
+        }
+        result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "htmlCollection");
+        return result;
     };
     v9ng.envmtImpl.Element_prototype$id_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "id");
+        return this[v9ng.cache.domSymbol].id;
     };
     v9ng.envmtImpl.Element_prototype$id_set = function (value) {
-        return v9ng.toolsFunc.setProtoProp.call(this, "id", value);
+        return (this[v9ng.cache.domSymbol].id = value);
     };
-    v9ng.envmtImpl.Element_prototype$innerHTML_set = v9ng.toolsFunc.noopFunc;
+    v9ng.envmtImpl.Element_prototype$innerHTML_get = function () {
+        return this[v9ng.cache.domSymbol].innerHTML;
+    };
+    v9ng.envmtImpl.Element_prototype$innerHTML_set = function (htmlCode) {
+        return (this[v9ng.cache.domSymbol].innerHTML = htmlCode);
+    };
+    v9ng.envmtImpl.Element_prototype$tagName_get = function () {
+        return this[v9ng.cache.domSymbol].tagName;
+    };
     v9ng.envmtImpl.Event_prototype$timeStamp_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "timeStamp");
     };
@@ -922,49 +983,36 @@
         v9ng.cache.listenEvents[type].push(event);
     };
     v9ng.envmtImpl.HTMLAnchorElement_prototype$hash_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "hash");
+        return this[v9ng.cache.domSymbol].hash;
     };
     v9ng.envmtImpl.HTMLAnchorElement_prototype$hostname_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "hostname");
+        return this[v9ng.cache.domSymbol].hostname;
     };
     v9ng.envmtImpl.HTMLAnchorElement_prototype$href_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "href");
+        return this[v9ng.cache.domSymbol].href;
     };
     v9ng.envmtImpl.HTMLAnchorElement_prototype$href_set = function (value) {
-        let urlStr = value;
-        if (urlStr.indexOf("http") === -1) {
-            urlStr = location.protocol + "//" + location.hostname + urlStr;
-        }
-        const urlObj = v9ng.toolsFunc.parseUrl(urlStr);
-        v9ng.toolsFunc.setProtoProp.call(this, "hash", urlObj["hash"]);
-        v9ng.toolsFunc.setProtoProp.call(this, "host", urlObj["host"]);
-        v9ng.toolsFunc.setProtoProp.call(this, "hostname", urlObj["hostname"]);
-        v9ng.toolsFunc.setProtoProp.call(this, "origin", urlObj["origin"]);
-        v9ng.toolsFunc.setProtoProp.call(this, "pathname", urlObj["pathname"]);
-        v9ng.toolsFunc.setProtoProp.call(this, "port", urlObj["port"]);
-        v9ng.toolsFunc.setProtoProp.call(this, "protocol", urlObj["protocol"]);
-        v9ng.toolsFunc.setProtoProp.call(this, "search", urlObj["search"]);
-        return v9ng.toolsFunc.setProtoProp.call(this, "href", urlObj["href"]);
+        return (this[v9ng.cache.domSymbol].href = value);
     };
     v9ng.envmtImpl.HTMLAnchorElement_prototype$origin_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "origin");
+        return this[v9ng.cache.domSymbol].origin;
     };
     v9ng.envmtImpl.HTMLAnchorElement_prototype$protocol_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "protocol");
+        return this[v9ng.cache.domSymbol].protocol;
     };
     v9ng.envmtImpl.HTMLAnchorElement_prototype$search_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "search");
+        return this[v9ng.cache.domSymbol].search;
     };
     v9ng.envmtImpl.HTMLCanvasElement_prototype$getContext = function (type) {
         let context = {};
         switch (type) {
             case "2d":
-                context = v9ng.toolsFunc.createProxyObj(context, CanvasRenderingContext2D, "context_2d");
+                context = v9ng.toolsFunc.createProxyObj(context, CanvasRenderingContext2D, "canvasRenderingContext2D");
                 v9ng.toolsFunc.setProtoProp.call(context, "canvas", this);
                 v9ng.toolsFunc.setProtoProp.call(this, "type", type);
                 break;
             case "webgl":
-                context = v9ng.toolsFunc.createProxyObj(context, WebGLRenderingContext, "context_webgl");
+                context = v9ng.toolsFunc.createProxyObj(context, WebGLRenderingContext, "webGLRenderingContext");
                 v9ng.toolsFunc.setProtoProp.call(context, "canvas", this);
                 v9ng.toolsFunc.setProtoProp.call(this, "type", type);
                 break;
@@ -972,26 +1020,38 @@
                 v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: HTMLCanvasElement_prototype$getContext("${type}")`);
                 break;
         }
+        const domObj = this[v9ng.cache.domSymbol].getContext(type);
+        Object.defineProperty(domObj, v9ng.cache.ptrSymbol, {
+            configurable: false,
+            enumerable: false,
+            writable: false,
+            value: context,
+        });
+        Object.defineProperty(context, v9ng.cache.domSymbol, {
+            configurable: false,
+            enumerable: false,
+            writable: false,
+            value: domObj,
+        });
         return context;
     };
-    v9ng.envmtImpl.HTMLCanvasElement_prototype$height_set = v9ng.toolsFunc.noopFunc;
-    v9ng.envmtImpl.HTMLCanvasElement_prototype$toDataURL = function () {
-        let type = v9ng.toolsFunc.getProtoProp.call(this, "type");
-        if (type === "2d") {
-            return v9ng.cache.canvas_2d;
-        } else if (type === "webgl") {
-            return v9ng.cache.canvas_webgl;
-        }
+    v9ng.envmtImpl.HTMLCanvasElement_prototype$height_set = function (value) {
+        return (this[v9ng.cache.domSymbol].height = value);
     };
-    v9ng.envmtImpl.HTMLCanvasElement_prototype$width_set = v9ng.toolsFunc.noopFunc;
+    v9ng.envmtImpl.HTMLCanvasElement_prototype$toDataURL = function () {
+        return this[v9ng.cache.domSymbol].toDataURL();
+    };
+    v9ng.envmtImpl.HTMLCanvasElement_prototype$width_set = function (value) {
+        return (this[v9ng.cache.domSymbol].width = value);
+    };
     v9ng.envmtImpl.HTMLDivElement_prototype$align_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "align");
+        return this[v9ng.cache.domSymbol].align;
     };
     v9ng.envmtImpl.HTMLDivElement_prototype$align_set = function (value) {
-        return v9ng.toolsFunc.setProtoProp.call(this, "align", value);
+        return (this[v9ng.cache.domSymbol].align = value);
     };
     v9ng.envmtImpl.HTMLElement_prototype$offsetHeight_get = function () {
-        let fontFamily = this.style.fontFamily;
+        let fontFamily = this[v9ng.cache.domSymbol].style.fontFamily;
         if (v9ng.cache.fontList.includes(fontFamily)) {
             return 161;
         } else {
@@ -999,55 +1059,87 @@
         }
     };
     v9ng.envmtImpl.HTMLElement_prototype$offsetWidth_get = function () {
-        let fontFamily = this.style.fontFamily;
+        let fontFamily = this[v9ng.cache.domSymbol].style.fontFamily;
         if (v9ng.cache.fontList.includes(fontFamily)) {
             return 640;
         } else {
             return 614;
         }
     };
+    v9ng.envmtImpl.HTMLElement_prototype$onmouseenter_get = function () {
+        return this[v9ng.cache.domSymbol].onmouseenter;
+    };
+    v9ng.envmtImpl.HTMLElement_prototype$onresize_get = function () {
+        return this[v9ng.cache.domSymbol].onresize;
+    };
     v9ng.envmtImpl.HTMLElement_prototype$style_get = function () {
-        let style = v9ng.toolsFunc.getProtoProp.call(this, "style");
-        if (style === undefined) {
-            style = v9ng.toolsFunc.createProxyObj({}, CSSStyleDeclaration, "style");
-        }
-        return style;
+        return this[v9ng.cache.domSymbol].style;
     };
     v9ng.envmtImpl.HTMLScriptElement_prototype$charset_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "charset");
+        return this[v9ng.cache.domSymbol].charset;
     };
     v9ng.envmtImpl.HTMLScriptElement_prototype$charset_set = function (value) {
-        return v9ng.toolsFunc.setProtoProp.call(this, "charset", value);
+        return (this[v9ng.cache.domSymbol].charset = value);
     };
     v9ng.envmtImpl.HTMLScriptElement_prototype$src_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "src");
+        return this[v9ng.cache.domSymbol].src;
     };
     v9ng.envmtImpl.HTMLScriptElement_prototype$src_set = function (value) {
-        return v9ng.toolsFunc.setProtoProp.call(this, "src", value);
+        return (this[v9ng.cache.domSymbol].src = value);
     };
     v9ng.envmtImpl.HTMLScriptElement_prototype$type_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "type");
+        return this[v9ng.cache.domSymbol].type;
     };
     v9ng.envmtImpl.HTMLScriptElement_prototype$type_set = function (value) {
-        return v9ng.toolsFunc.setProtoProp.call(this, "type", value);
+        return (this[v9ng.cache.domSymbol].type = value);
     };
     v9ng.envmtImpl.HTMLMetaElement_prototype$content_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "content");
+        return this[v9ng.cache.domSymbol].content;
     };
     v9ng.envmtImpl.HTMLMetaElement_prototype$content_set = function (value) {
-        return v9ng.toolsFunc.setProtoProp.call(this, "content", value);
+        return (this[v9ng.cache.domSymbol].content = value);
+    };
+    v9ng.envmtImpl.IDBDatabase_prototype$name_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "name");
+    };
+    v9ng.envmtImpl.IDBDatabase_prototype$version_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "version");
+    };
+    v9ng.envmtImpl.IDBOpenDBRequest_prototype$onupgradeneeded_set = function (callback) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "onupgradeneeded", callback);
+    };
+    v9ng.envmtImpl.IDBRequest_prototype$onerror_set = function (callback) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "onerror", callback);
+    };
+    v9ng.envmtImpl.IDBRequest_prototype$onsuccess_set = function (callback) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "onsuccess", callback);
+    };
+    v9ng.envmtImpl.IDBFactory_prototype$open = function (name, version) {
+        const idbOpenDBRequest = v9ng.toolsFunc.createProxyObj({}, IDBOpenDBRequest, "idbOpenDBRequest");
+        v9ng.toolsFunc.setProtoProp.call(idbOpenDBRequest, "readyState", "done");
+        const idbDatabase = v9ng.toolsFunc.createProxyObj({}, IDBDatabase, "idbDatabase");
+        v9ng.toolsFunc.setProtoProp.call(idbDatabase, "name", name);
+        v9ng.toolsFunc.setProtoProp.call(idbDatabase, "version", version);
+        v9ng.toolsFunc.setProtoProp.call(idbOpenDBRequest, "result", idbDatabase);
+        return idbOpenDBRequest;
+    };
+    v9ng.envmtImpl.IDBRequest_prototype$result_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "result");
+    };
+    v9ng.envmtImpl.location$href_get = function () {
+        return document[v9ng.cache.domSymbol].location.href;
     };
     v9ng.envmtImpl.location$hostname_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "hostname");
+        return document[v9ng.cache.domSymbol].location.hostname;
     };
     v9ng.envmtImpl.location$hostname_set = function (value) {
-        return v9ng.toolsFunc.setProtoProp.call(this, "hostname", value);
+        return (document[v9ng.cache.domSymbol].location.hostname = value);
     };
     v9ng.envmtImpl.location$protocol_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "protocol");
+        return document[v9ng.cache.domSymbol].location.protocol;
     };
     v9ng.envmtImpl.location$protocol_set = function (value) {
-        return v9ng.toolsFunc.setProtoProp.call(this, "protocol", value);
+        return (document[v9ng.cache.domSymbol].location.protocol = value);
     };
     v9ng.envmtImpl.MimeType_prototype$description_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "description");
@@ -1076,19 +1168,27 @@
     v9ng.envmtImpl.MouseEvent_prototype$clientY_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "clientY");
     };
+    v9ng.envmtImpl.Navigator_prototype$connection_get = function () {
+        return v9ng.toolsFunc.createProxyObj({}, NetworkInformation, "networkInformation");
+    };
     v9ng.envmtImpl.Navigator_prototype$getBattery = function () {
-        let batteryManager = {};
-        batteryManager = v9ng.toolsFunc.createProxyObj(batteryManager, BatteryManager, "batteryManager");
-        let obj = {
+        const batteryManager = v9ng.toolsFunc.createProxyObj({}, BatteryManager, "batteryManager");
+        const obj = {
             "then": function (callBack) {
-                let _callBack = callBack;
-                callBack = function () {
-                    return _callBack(batteryManager);
-                }
-                v9ng.cache.promiseEvents.push(callBack);
-            }
-        }
+                v9ng.cache.callbackFuncs.push(function () {
+                    return callBack(batteryManager);
+                });
+            },
+        };
         return obj;
+        // return new Promise(function (resolve) {
+        //     let batteryManager = {};
+        //     batteryManager = v9ng.toolsFunc.createProxyObj(batteryManager, BatteryManager, "batteryManager");
+        //     return resolve(batteryManager);
+        // });
+    };
+    v9ng.envmtImpl.Navigator_prototype$languages_get = function () {
+        return ['zh-CN', 'zh'];
     };
     v9ng.envmtImpl.Navigator_prototype$mimeTypes_get = function () {
         return v9ng.cache.mimeTypeArray;
@@ -1096,18 +1196,56 @@
     v9ng.envmtImpl.Navigator_prototype$plugins_get = function () {
         return v9ng.cache.pluginArray;
     };
+    v9ng.envmtImpl.Navigator_prototype$webkitPersistentStorage_get = function () {
+        const DeprecatedStorageQuota = function () { };
+        v9ng.toolsFunc.ctorGuard(DeprecatedStorageQuota, "DeprecatedStorageQuota");
+        v9ng.toolsFunc.defineProperty(DeprecatedStorageQuota.prototype, "queryUsageAndQuota", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: function () {
+                return v9ng.toolsFunc.funcDispatch(this, "DeprecatedStorageQuota.prototype", "queryUsageAndQuota", arguments);
+            },
+        });
+        v9ng.toolsFunc.defineProperty(DeprecatedStorageQuota.prototype, "requestQuota", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: function () {
+                return v9ng.toolsFunc.funcDispatch(this, "DeprecatedStorageQuota.prototype", "requestQuota", arguments);
+            },
+        });
+        delete DeprecatedStorageQuota.prototype.constructor;
+        return v9ng.toolsFunc.createProxyObj({}, DeprecatedStorageQuota, "deprecatedStorageQuota");
+    };
     v9ng.envmtImpl.Node_prototype$appendChild = function (tag) {
-        // TODO: fix and set parentNode
-        let collection = [];
-        collection.push(tag);
-        collection = v9ng.toolsFunc.createProxyObj(collection, HTMLCollection, "HTMLCollection");
-        v9ng.toolsFunc.setProtoProp.call(this, "children", collection);
-        return tag;
+        return this[v9ng.cache.domSymbol].appendChild(tag[v9ng.cache.domSymbol])[v9ng.cache.ptrSymbol];
+    };
+    v9ng.envmtImpl.Node_prototype$parentElement_get = function () {
+        const parentNodeDom = this[v9ng.cache.domSymbol].parentElement;
+        if (parentNodeDom === null) {
+            return null;
+        }
+        if (parentNodeDom[v9ng.cache.ptrSymbol]) {
+            return parentNodeDom[v9ng.cache.ptrSymbol];
+        } else {
+            return v9ng.toolsFunc.genHtmlElement(parentNodeDom);
+        }
     };
     v9ng.envmtImpl.Node_prototype$parentNode_get = function () {
-        return v9ng.toolsFunc.getProtoProp.call(this, "parentNode");
+        const parentNodeDom = this[v9ng.cache.domSymbol].parentNode;
+        if (parentNodeDom === null) {
+            return null;
+        }
+        if (parentNodeDom[v9ng.cache.ptrSymbol]) {
+            return parentNodeDom[v9ng.cache.ptrSymbol];
+        } else {
+            return v9ng.toolsFunc.genHtmlElement(parentNodeDom);
+        }
     };
-    v9ng.envmtImpl.Node_prototype$removeChild = v9ng.toolsFunc.noopFunc; // TODO
+    v9ng.envmtImpl.Node_prototype$removeChild = function (tag) {
+        return this[v9ng.cache.domSymbol].removeChild(tag[v9ng.cache.domSymbol])[v9ng.cache.ptrSymbol];
+    };
     v9ng.envmtImpl.Plugin_prototype$description_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "description");
     };
@@ -1168,27 +1306,65 @@
         return v9ng.toolsFunc.getProtoProp.call(this, "canvas");
     };
     v9ng.envmtImpl.WebGLRenderingContext_prototype$createBuffer = function () {
-        let buffer = {};
-        buffer = v9ng.toolsFunc.createProxyObj(buffer, WebGLBuffer, "buffer");
-        return buffer;
+        return v9ng.toolsFunc.createProxyObj({}, WebGLBuffer, "webGLBuffer");
     };
     v9ng.envmtImpl.WebGLRenderingContext_prototype$createProgram = function () {
-        let program = {};
-        program = v9ng.toolsFunc.createProxyObj(program, WebGLProgram, "program");
-        return program;
+        return v9ng.toolsFunc.createProxyObj({}, WebGLProgram, "webGLProgram");
     };
-    v9ng.envmtImpl.window$clearTimeout = function (timeoutId) {
-        for (let i = 0; i < v9ng.cache.timeoutEvents.length; i++) {
-            let event = v9ng.cache.timeoutEvents[i];
+    v9ng.envmtImpl.window$clearInterval = function (timeoutId) {
+        for (let i = 0; i < v9ng.cache.asyncEvents.length; i++) {
+            let event = v9ng.cache.asyncEvents[i];
             if (event.timeoutId === timeoutId) {
-                delete v9ng.cache.timeoutEvents[i];
+                delete v9ng.cache.asyncEvents[i];
             }
         }
+    };
+    v9ng.envmtImpl.window$clearTimeout = v9ng.envmtImpl.window$clearInterval;
+    v9ng.envmtImpl.window$clientInformation_get = function () {
+        return navigator;
+    };
+    v9ng.envmtImpl.window$openDatabase = function (name, version, description, size) {
+        const Database = function () { };
+        v9ng.toolsFunc.ctorGuard(Database, "Database");
+        v9ng.toolsFunc.defineProperty(Database, "version", {
+            configurable: true,
+            enumerable: true,
+            get: function () {
+                return v9ng.toolsFunc.funcDispatch(this, "Database", "version_get", arguments, version);
+            },
+            set: undefined,
+        });
+        v9ng.toolsFunc.defineProperty(Database, "changeVersion", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: function () {
+                return v9ng.toolsFunc.funcDispatch(this, "Database", "changeVersion", arguments);
+            },
+        });
+        v9ng.toolsFunc.defineProperty(Database, "readTransaction", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: function () {
+                return v9ng.toolsFunc.funcDispatch(this, "Database", "readTransaction", arguments);
+            },
+        });
+        v9ng.toolsFunc.defineProperty(Database, "transaction", {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: function () {
+                return v9ng.toolsFunc.funcDispatch(this, "Database", "transaction", arguments);
+            },
+        });
+        delete Database.prototype.constructor;
+        return v9ng.toolsFunc.createProxyObj({}, Database, "database");
     };
     v9ng.envmtImpl.window$self_get = function () {
         return window;
     };
-    v9ng.envmtImpl.window$setTimeout = function () {
+    v9ng.envmtImpl.window$setInterval = function () {
         let func = arguments[0];
         let delay = arguments[1] || 0;
         let length = arguments.length;
@@ -1200,19 +1376,23 @@
         if (typeof func !== "function") {
             type = 0; // eval code
         }
-        v9ng.cache.timeFuncCursor += 1;
+        v9ng.cache.asyncEventCursor += 1;
         let event = {
             "callback": func,
             "delay": delay,
             "args": args,
             "type": type,
-            "timeoutId": v9ng.cache.timeFuncCursor
+            "timeoutId": v9ng.cache.asyncEventCursor
         }
-        v9ng.cache.timeoutEvents.push(event);
-        return v9ng.cache.timeFuncCursor;
+        v9ng.cache.asyncEvents.push(event);
+        return v9ng.cache.asyncEventCursor;
     };
+    v9ng.envmtImpl.window$setTimeout = v9ng.envmtImpl.window$setInterval;
     v9ng.envmtImpl.window$top_get = function () {
         return window;
+    };
+    v9ng.envmtImpl.window$webkitRequestFileSystem = function (type, size, successCallback, errorCallback) {
+        v9ng.cache.callbackFuncs.push(successCallback);
     };
     v9ng.envmtImpl.XMLHttpRequest_prototype$open = function (method, url) {
         return url;
@@ -1223,10 +1403,10 @@
 (function () {
     v9ng.toolsFunc.saveLog = function (args) {
         if (args.length === 1 && typeof args[0] === 'string') {
-            fs.appendFileSync("./output/rs4.log", `
+            v9ng.cache.fs.appendFileSync("./output/rs4.log", `
 ${(args[0])}`);
         } else {
-            fs.appendFileSync("./output/rs4.log", `
+            v9ng.cache.fs.appendFileSync("./output/rs4.log", `
 ${v9ng.toolsFunc.commToString(args)}`);
         }
     };
@@ -1299,6 +1479,157 @@ ${v9ng.toolsFunc.commToString(args)}`);
         enumerable: true,
         writable: false,
         value: 1,
+    });
+})();
+(function () { // Screen
+    Screen = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(Screen, "Screen");
+    Object.setPrototypeOf(Screen.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "availWidth", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "availWidth_get", arguments, 1920);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "availHeight", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "availHeight_get", arguments, 1080);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "width_get", arguments, 1920);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "height_get", arguments, 1080);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "colorDepth", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "colorDepth_get", arguments, 24);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "pixelDepth", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "pixelDepth_get", arguments, 24);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "availLeft", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "availLeft_get", arguments, 0);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "availTop", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "availTop_get", arguments, 0);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "orientation", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "orientation_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "onchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "onchange_get", arguments, null);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "onchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Screen.prototype, "isExtended", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Screen.prototype", "isExtended_get", arguments, false);
+        },
+        set: undefined,
+    });
+})();
+
+(function () { // screen
+    screen = {};
+    Object.setPrototypeOf(screen, Screen.prototype);
+})();
+(function () { // ScreenOrientation
+    ScreenOrientation = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(ScreenOrientation, "ScreenOrientation");
+    Object.setPrototypeOf(ScreenOrientation.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(ScreenOrientation.prototype, "angle", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "ScreenOrientation.prototype", "angle_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(ScreenOrientation.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "ScreenOrientation.prototype", "type_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(ScreenOrientation.prototype, "onchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "ScreenOrientation.prototype", "onchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "ScreenOrientation.prototype", "onchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(ScreenOrientation.prototype, "lock", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "ScreenOrientation.prototype", "lock", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(ScreenOrientation.prototype, "unlock", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "ScreenOrientation.prototype", "unlock", arguments);
+        },
     });
 })();
 (function () { // Node
@@ -4550,6 +4881,256 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+(function () { // HTMLAreaElement
+    HTMLAreaElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLAreaElement, "HTMLAreaElement");
+    Object.setPrototypeOf(HTMLAreaElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "alt", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "alt_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "alt_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "coords", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "coords_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "coords_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "download", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "download_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "download_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "shape", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "shape_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "shape_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "target", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "target_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "target_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "ping", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "ping_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "ping_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "rel", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "rel_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "rel_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "relList", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "relList_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "relList_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "referrerPolicy", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "referrerPolicy_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "referrerPolicy_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "noHref", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "noHref_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "noHref_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "origin", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "origin_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "protocol", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "protocol_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "protocol_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "username", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "username_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "username_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "password", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "password_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "password_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "host", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "host_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "host_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "hostname", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "hostname_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "hostname_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "port", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "port_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "port_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "pathname", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "pathname_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "pathname_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "search", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "search_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "search_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "hash", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "hash_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "hash_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "href", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "href_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "href_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLAreaElement.prototype, "toString", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLAreaElement.prototype", "toString", arguments);
+        },
+    });
+})();
+(function () { // HTMLBaseElement
+    HTMLBaseElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLBaseElement, "HTMLBaseElement");
+    Object.setPrototypeOf(HTMLBaseElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLBaseElement.prototype, "href", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLBaseElement.prototype", "href_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLBaseElement.prototype", "href_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLBaseElement.prototype, "target", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLBaseElement.prototype", "target_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLBaseElement.prototype", "target_set", arguments);
+        },
+    });
+})();
 (function () { // HTMLBodyElement
     HTMLBodyElement = function () {
         return v9ng.toolsFunc.throwError('TypeError', 'Illegal constructor');
@@ -4837,6 +5418,204 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+(function () { // HTMLBRElement
+    HTMLBRElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLBRElement, "HTMLBRElement");
+    Object.setPrototypeOf(HTMLBRElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLBRElement.prototype, "clear", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLBRElement.prototype", "clear_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLBRElement.prototype", "clear_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLButtonElement
+    HTMLButtonElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLButtonElement, "HTMLButtonElement");
+    Object.setPrototypeOf(HTMLButtonElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "disabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "disabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "disabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "formAction", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formAction_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formAction_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "formEnctype", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formEnctype_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formEnctype_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "formMethod", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formMethod_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formMethod_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "formNoValidate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formNoValidate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formNoValidate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "formTarget", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formTarget_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "formTarget_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "willValidate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "willValidate_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "validity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "validity_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "validationMessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "validationMessage_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "labels", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "labels_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "checkValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "checkValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "reportValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "reportValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "setCustomValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "setCustomValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "popoverTargetElement", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "popoverTargetElement_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "popoverTargetElement_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLButtonElement.prototype, "popoverTargetAction", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "popoverTargetAction_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLButtonElement.prototype", "popoverTargetAction_set", arguments);
+        },
+    });
+})();
 (function () { // HTMLCanvasElement
     HTMLCanvasElement = function () {
         return v9ng.toolsFunc.throwError('TypeError', 'Illegal constructor');
@@ -4904,6 +5683,123 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+(function () { // HTMLDataElement
+    HTMLDataElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLDataElement, "HTMLDataElement");
+    Object.setPrototypeOf(HTMLDataElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLDataElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDataElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDataElement.prototype", "value_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLDataListElement
+    HTMLDataListElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLDataListElement, "HTMLDataListElement");
+    Object.setPrototypeOf(HTMLDataListElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLDataListElement.prototype, "options", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDataListElement.prototype", "options_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // HTMLDetailsElement
+    HTMLDetailsElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLDetailsElement, "HTMLDetailsElement");
+    Object.setPrototypeOf(HTMLDetailsElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLDetailsElement.prototype, "open", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDetailsElement.prototype", "open_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDetailsElement.prototype", "open_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLDialogElement
+    HTMLDialogElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLDialogElement, "HTMLDialogElement");
+    Object.setPrototypeOf(HTMLDialogElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLDialogElement.prototype, "open", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDialogElement.prototype", "open_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDialogElement.prototype", "open_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLDialogElement.prototype, "returnValue", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDialogElement.prototype", "returnValue_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDialogElement.prototype", "returnValue_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLDialogElement.prototype, "close", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDialogElement.prototype", "close", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLDialogElement.prototype, "show", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDialogElement.prototype", "show", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLDialogElement.prototype, "showModal", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDialogElement.prototype", "showModal", arguments);
+        },
+    });
+})();
+(function () { // HTMLDirectoryElement
+    HTMLDirectoryElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLDirectoryElement, "HTMLDirectoryElement");
+    Object.setPrototypeOf(HTMLDirectoryElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLDirectoryElement.prototype, "compact", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDirectoryElement.prototype", "compact_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDirectoryElement.prototype", "compact_set", arguments);
+        },
+    });
+})();
 (function () { // HTMLDivElement
     HTMLDivElement = function () {
         return v9ng.toolsFunc.throwError('TypeError', 'Illegal constructor');
@@ -4921,12 +5817,1356 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+(function () { // HTMLDListElement
+    HTMLDListElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLDListElement, "HTMLDListElement");
+    Object.setPrototypeOf(HTMLDListElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLDListElement.prototype, "compact", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDListElement.prototype", "compact_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLDListElement.prototype", "compact_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLEmbedElement
+    HTMLEmbedElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLEmbedElement, "HTMLEmbedElement");
+    Object.setPrototypeOf(HTMLEmbedElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLEmbedElement.prototype, "src", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "src_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "src_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLEmbedElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLEmbedElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLEmbedElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "height_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "height_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLEmbedElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLEmbedElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLEmbedElement.prototype, "getSVGDocument", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLEmbedElement.prototype", "getSVGDocument", arguments);
+        },
+    });
+})();
+(function () { // HTMLFieldSetElement
+    HTMLFieldSetElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLFieldSetElement, "HTMLFieldSetElement");
+    Object.setPrototypeOf(HTMLFieldSetElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "disabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "disabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "disabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "type_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "elements", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "elements_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "willValidate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "willValidate_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "validity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "validity_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "validationMessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "validationMessage_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "checkValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "checkValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "reportValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "reportValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFieldSetElement.prototype, "setCustomValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFieldSetElement.prototype", "setCustomValidity", arguments);
+        },
+    });
+})();
+(function () { // HTMLFontElement
+    HTMLFontElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLFontElement, "HTMLFontElement");
+    Object.setPrototypeOf(HTMLFontElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLFontElement.prototype, "color", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFontElement.prototype", "color_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFontElement.prototype", "color_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFontElement.prototype, "face", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFontElement.prototype", "face_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFontElement.prototype", "face_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFontElement.prototype, "size", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFontElement.prototype", "size_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFontElement.prototype", "size_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLFormElement
+    HTMLFormElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLFormElement, "HTMLFormElement");
+    Object.setPrototypeOf(HTMLFormElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "acceptCharset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "acceptCharset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "acceptCharset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "action", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "action_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "action_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "autocomplete", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "autocomplete_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "autocomplete_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "enctype", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "enctype_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "enctype_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "encoding", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "encoding_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "encoding_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "method", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "method_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "method_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "noValidate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "noValidate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "noValidate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "target", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "target_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "target_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "elements", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "elements_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "length", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "length_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "checkValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "checkValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "reportValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "reportValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "requestSubmit", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "requestSubmit", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "reset", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "reset", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "submit", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "submit", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "rel", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "rel_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "rel_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFormElement.prototype, "relList", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "relList_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFormElement.prototype", "relList_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLFrameElement
+    HTMLFrameElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLFrameElement, "HTMLFrameElement");
+    Object.setPrototypeOf(HTMLFrameElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "scrolling", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "scrolling_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "scrolling_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "src", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "src_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "src_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "frameBorder", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "frameBorder_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "frameBorder_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "longDesc", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "longDesc_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "longDesc_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "noResize", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "noResize_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "noResize_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "contentDocument", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "contentDocument_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "contentWindow", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "contentWindow_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "marginHeight", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "marginHeight_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "marginHeight_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameElement.prototype, "marginWidth", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "marginWidth_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameElement.prototype", "marginWidth_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLFrameSetElement
+    HTMLFrameSetElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLFrameSetElement, "HTMLFrameSetElement");
+    Object.setPrototypeOf(HTMLFrameSetElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "cols", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "cols_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "cols_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "rows", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "rows_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "rows_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onblur", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onblur_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onblur_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onerror_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onfocus", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onfocus_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onfocus_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onload", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onload_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onload_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onresize", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onresize_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onresize_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onscroll", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onscroll_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onscroll_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onafterprint", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onafterprint_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onafterprint_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onbeforeprint", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onbeforeprint_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onbeforeprint_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onbeforeunload", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onbeforeunload_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onbeforeunload_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onhashchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onhashchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onhashchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onlanguagechange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onlanguagechange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onlanguagechange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onmessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onmessage_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onmessage_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onmessageerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onmessageerror_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onmessageerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onoffline", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onoffline_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onoffline_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "ononline", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "ononline_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "ononline_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onpagehide", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onpagehide_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onpagehide_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onpageshow", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onpageshow_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onpageshow_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onpopstate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onpopstate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onpopstate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onrejectionhandled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onrejectionhandled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onrejectionhandled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onstorage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onstorage_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onstorage_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onunhandledrejection", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onunhandledrejection_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onunhandledrejection_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLFrameSetElement.prototype, "onunload", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onunload_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLFrameSetElement.prototype", "onunload_set", arguments);
+        },
+    });
+})();
 (function () { // HTMLHeadElement
     HTMLHeadElement = function () {
         return v9ng.toolsFunc.throwError('TypeError', 'Illegal constructor');
     };
     v9ng.toolsFunc.ctorGuard(HTMLHeadElement, "HTMLHeadElement");
     Object.setPrototypeOf(HTMLHeadElement.prototype, HTMLElement.prototype);
+})();
+(function () { // HTMLHeadingElement
+    HTMLHeadingElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLHeadingElement, "HTMLHeadingElement");
+    Object.setPrototypeOf(HTMLHeadingElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLHeadingElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHeadingElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHeadingElement.prototype", "align_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLHRElement
+    HTMLHRElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLHRElement, "HTMLHRElement");
+    Object.setPrototypeOf(HTMLHRElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLHRElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLHRElement.prototype, "color", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "color_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "color_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLHRElement.prototype, "noShade", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "noShade_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "noShade_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLHRElement.prototype, "size", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "size_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "size_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLHRElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHRElement.prototype", "width_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLHtmlElement
+    HTMLHtmlElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLHtmlElement, "HTMLHtmlElement");
+    Object.setPrototypeOf(HTMLHtmlElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLHtmlElement.prototype, "version", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHtmlElement.prototype", "version_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLHtmlElement.prototype", "version_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLIFrameElement
+    HTMLIFrameElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLIFrameElement, "HTMLIFrameElement");
+    Object.setPrototypeOf(HTMLIFrameElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "src", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "src_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "src_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "srcdoc", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "srcdoc_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "srcdoc_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "sandbox", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "sandbox_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "sandbox_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "allowFullscreen", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "allowFullscreen_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "allowFullscreen_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "height_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "height_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "contentDocument", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "contentDocument_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "contentWindow_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "referrerPolicy", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "referrerPolicy_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "referrerPolicy_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "csp", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "csp_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "csp_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "allow", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "allow_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "allow_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "featurePolicy", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "featurePolicy_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "scrolling", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "scrolling_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "scrolling_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "frameBorder", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "frameBorder_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "frameBorder_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "longDesc", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "longDesc_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "longDesc_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "marginHeight", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "marginHeight_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "marginHeight_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "marginWidth", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "marginWidth_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "marginWidth_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "getSVGDocument", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "getSVGDocument", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "loading", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "loading_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "loading_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "credentialless", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "credentialless_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "credentialless_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "allowPaymentRequest", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "allowPaymentRequest_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "allowPaymentRequest_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLIFrameElement.prototype, "privateToken", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "privateToken_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLIFrameElement.prototype", "privateToken_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLImageElement
+    HTMLImageElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLImageElement, "HTMLImageElement");
+    Object.setPrototypeOf(HTMLImageElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "alt", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "alt_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "alt_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "src", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "src_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "src_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "srcset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "srcset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "srcset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "sizes", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "sizes_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "sizes_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "crossOrigin", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "crossOrigin_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "crossOrigin_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "useMap", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "useMap_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "useMap_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "isMap", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "isMap_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "isMap_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "height_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "height_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "naturalWidth", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "naturalWidth_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "naturalHeight", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "naturalHeight_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "complete", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "complete_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "currentSrc", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "currentSrc_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "referrerPolicy", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "referrerPolicy_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "referrerPolicy_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "decoding", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "decoding_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "decoding_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "fetchPriority", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "fetchPriority_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "fetchPriority_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "loading", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "loading_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "loading_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "lowsrc", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "lowsrc_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "lowsrc_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "hspace", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "hspace_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "hspace_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "vspace", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "vspace_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "vspace_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "longDesc", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "longDesc_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "longDesc_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "border", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "border_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "border_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "x", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "x_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "y", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "y_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLImageElement.prototype, "decode", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLImageElement.prototype", "decode", arguments);
+        },
+    });
 })();
 (function () { // HTMLInputElement
     HTMLInputElement = function () {
@@ -5493,6 +7733,966 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+(function () { // HTMLLabelElement
+    HTMLLabelElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLLabelElement, "HTMLLabelElement");
+    Object.setPrototypeOf(HTMLLabelElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLLabelElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLabelElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLabelElement.prototype, "htmlFor", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLabelElement.prototype", "htmlFor_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLabelElement.prototype", "htmlFor_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLabelElement.prototype, "control", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLabelElement.prototype", "control_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // HTMLLegendElement
+    HTMLLegendElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLLegendElement, "HTMLLegendElement");
+    Object.setPrototypeOf(HTMLLegendElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLLegendElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLegendElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLegendElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLegendElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLegendElement.prototype", "align_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLLIElement
+    HTMLLIElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLLIElement, "HTMLLIElement");
+    Object.setPrototypeOf(HTMLLIElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLLIElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLIElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLIElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLIElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLIElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLIElement.prototype", "type_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLLinkElement
+    HTMLLinkElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLLinkElement, "HTMLLinkElement");
+    Object.setPrototypeOf(HTMLLinkElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "disabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "disabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "disabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "href", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "href_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "href_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "crossOrigin", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "crossOrigin_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "crossOrigin_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "rel", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "rel_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "rel_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "relList", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "relList_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "relList_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "media", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "media_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "media_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "hreflang", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "hreflang_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "hreflang_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "as", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "as_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "as_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "referrerPolicy", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "referrerPolicy_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "referrerPolicy_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "sizes", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "sizes_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "sizes_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "fetchPriority", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "fetchPriority_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "fetchPriority_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "imageSrcset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "imageSrcset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "imageSrcset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "imageSizes", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "imageSizes_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "imageSizes_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "charset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "charset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "charset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "rev", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "rev_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "rev_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "target", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "target_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "target_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "sheet", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "sheet_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "integrity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "integrity_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "integrity_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLLinkElement.prototype, "blocking", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "blocking_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLLinkElement.prototype", "blocking_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLMapElement
+    HTMLMapElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLMapElement, "HTMLMapElement");
+    Object.setPrototypeOf(HTMLMapElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLMapElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMapElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMapElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMapElement.prototype, "areas", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMapElement.prototype", "areas_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // HTMLMarqueeElement
+    HTMLMarqueeElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLMarqueeElement, "HTMLMarqueeElement");
+    Object.setPrototypeOf(HTMLMarqueeElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "behavior", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "behavior_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "behavior_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "bgColor", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "bgColor_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "bgColor_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "direction", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "direction_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "direction_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "height_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "height_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "hspace", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "hspace_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "hspace_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "loop", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "loop_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "loop_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "scrollAmount", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "scrollAmount_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "scrollAmount_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "scrollDelay", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "scrollDelay_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "scrollDelay_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "trueSpeed", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "trueSpeed_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "trueSpeed_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "vspace", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "vspace_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "vspace_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "start", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "start", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMarqueeElement.prototype, "stop", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMarqueeElement.prototype", "stop", arguments);
+        },
+    });
+})();
+(function () { // HTMLMediaElement
+    HTMLMediaElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLMediaElement, "HTMLMediaElement");
+    Object.setPrototypeOf(HTMLMediaElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "NETWORK_EMPTY", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 0,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "NETWORK_IDLE", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 1,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "NETWORK_LOADING", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 2,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "NETWORK_NO_SOURCE", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 3,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "HAVE_NOTHING", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 0,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "HAVE_METADATA", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 1,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "HAVE_CURRENT_DATA", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 2,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "HAVE_FUTURE_DATA", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 3,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement, "HAVE_ENOUGH_DATA", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 4,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "error", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "error_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "src", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "src_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "src_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "currentSrc", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "currentSrc_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "crossOrigin", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "crossOrigin_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "crossOrigin_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "networkState", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "networkState_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "preload", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "preload_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "preload_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "buffered", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "buffered_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "readyState", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "readyState_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "seeking", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "seeking_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "currentTime_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "currentTime_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "duration", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "duration_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "paused", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "paused_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "defaultPlaybackRate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "defaultPlaybackRate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "defaultPlaybackRate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "playbackRate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "playbackRate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "playbackRate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "played", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "played_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "seekable", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "seekable_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "ended", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "ended_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "autoplay", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "autoplay_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "autoplay_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "loop", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "loop_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "loop_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "preservesPitch", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "preservesPitch_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "preservesPitch_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "controls", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "controls_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "controls_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "controlsList", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "controlsList_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "controlsList_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "volume", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "volume_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "volume_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "muted", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "muted_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "muted_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "defaultMuted", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "defaultMuted_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "defaultMuted_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "textTracks", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "textTracks_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "webkitAudioDecodedByteCount", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "webkitAudioDecodedByteCount_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "webkitVideoDecodedByteCount", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "webkitVideoDecodedByteCount_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "onencrypted", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "onencrypted_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "onencrypted_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "onwaitingforkey", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "onwaitingforkey_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "onwaitingforkey_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "srcObject_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "srcObject_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "NETWORK_EMPTY", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 0,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "NETWORK_IDLE", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 1,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "NETWORK_LOADING", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 2,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "NETWORK_NO_SOURCE", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 3,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "HAVE_NOTHING", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 0,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "HAVE_METADATA", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 1,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "HAVE_CURRENT_DATA", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 2,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "HAVE_FUTURE_DATA", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 3,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "HAVE_ENOUGH_DATA", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 4,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "addTextTrack", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "addTextTrack", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "canPlayType", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "canPlayType", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "captureStream", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "captureStream", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "load", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "load", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "pause", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "pause", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "play", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "play", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "sinkId", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "sinkId_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "remote", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "remote_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "disableRemotePlayback", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "disableRemotePlayback_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "disableRemotePlayback_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "setSinkId", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "mediaKeys", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "mediaKeys_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMediaElement.prototype, "setMediaKeys", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMediaElement.prototype", "setMediaKeys", arguments);
+        },
+    });
+})();
+(function () { // HTMLMenuElement
+    HTMLMenuElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLMenuElement, "HTMLMenuElement");
+    Object.setPrototypeOf(HTMLMenuElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLMenuElement.prototype, "compact", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMenuElement.prototype", "compact_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMenuElement.prototype", "compact_set", arguments);
+        },
+    });
+})();
 (function () { // HTMLMetaElement
     HTMLMetaElement = function () {
         return v9ng.toolsFunc.throwError('TypeError', 'Illegal constructor');
@@ -5547,6 +8747,779 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
         set: function () {
             return v9ng.toolsFunc.funcDispatch(this, "HTMLMetaElement.prototype", "scheme_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLMeterElement
+    HTMLMeterElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLMeterElement, "HTMLMeterElement");
+    Object.setPrototypeOf(HTMLMeterElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLMeterElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMeterElement.prototype, "min", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "min_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "min_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMeterElement.prototype, "max", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "max_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "max_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMeterElement.prototype, "low", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "low_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "low_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMeterElement.prototype, "high", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "high_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "high_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMeterElement.prototype, "optimum", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "optimum_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "optimum_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLMeterElement.prototype, "labels", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLMeterElement.prototype", "labels_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // HTMLModElement
+    HTMLModElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLModElement, "HTMLModElement");
+    Object.setPrototypeOf(HTMLModElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLModElement.prototype, "cite", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLModElement.prototype", "cite_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLModElement.prototype", "cite_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLModElement.prototype, "dateTime", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLModElement.prototype", "dateTime_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLModElement.prototype", "dateTime_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLObjectElement
+    HTMLObjectElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLObjectElement, "HTMLObjectElement");
+    Object.setPrototypeOf(HTMLObjectElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "data", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "data_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "data_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "useMap", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "useMap_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "useMap_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "height_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "height_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "contentDocument", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "contentDocument_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "contentWindow", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "contentWindow_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "willValidate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "willValidate_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "validity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "validity_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "validationMessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "validationMessage_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "archive", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "archive_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "archive_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "code", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "code_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "code_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "declare", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "declare_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "declare_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "hspace", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "hspace_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "hspace_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "standby", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "standby_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "standby_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "vspace", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "vspace_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "vspace_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "codeBase", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "codeBase_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "codeBase_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "codeType", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "codeType_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "codeType_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "border", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "border_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "border_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "checkValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "checkValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "getSVGDocument", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "getSVGDocument", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "reportValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "reportValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLObjectElement.prototype, "setCustomValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLObjectElement.prototype", "setCustomValidity", arguments);
+        },
+    });
+})();
+(function () { // HTMLOListElement
+    HTMLOListElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLOListElement, "HTMLOListElement");
+    Object.setPrototypeOf(HTMLOListElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLOListElement.prototype, "reversed", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOListElement.prototype", "reversed_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOListElement.prototype", "reversed_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOListElement.prototype, "start", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOListElement.prototype", "start_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOListElement.prototype", "start_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOListElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOListElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOListElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOListElement.prototype, "compact", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOListElement.prototype", "compact_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOListElement.prototype", "compact_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLOptGroupElement
+    HTMLOptGroupElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLOptGroupElement, "HTMLOptGroupElement");
+    Object.setPrototypeOf(HTMLOptGroupElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLOptGroupElement.prototype, "disabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptGroupElement.prototype", "disabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptGroupElement.prototype", "disabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOptGroupElement.prototype, "label", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptGroupElement.prototype", "label_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptGroupElement.prototype", "label_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLOptionElement
+    HTMLOptionElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLOptionElement, "HTMLOptionElement");
+    Object.setPrototypeOf(HTMLOptionElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLOptionElement.prototype, "disabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "disabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "disabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOptionElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOptionElement.prototype, "label", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "label_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "label_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOptionElement.prototype, "defaultSelected", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "defaultSelected_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "defaultSelected_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOptionElement.prototype, "selected", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "selected_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "selected_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOptionElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOptionElement.prototype, "text", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "text_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "text_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOptionElement.prototype, "index", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOptionElement.prototype", "index_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // HTMLOutputElement
+    HTMLOutputElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLOutputElement, "HTMLOutputElement");
+    Object.setPrototypeOf(HTMLOutputElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "htmlFor", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "htmlFor_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "htmlFor_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "type_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "defaultValue", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "defaultValue_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "defaultValue_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "willValidate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "willValidate_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "validity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "validity_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "validationMessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "validationMessage_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "labels", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "labels_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "checkValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "checkValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "reportValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "reportValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLOutputElement.prototype, "setCustomValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLOutputElement.prototype", "setCustomValidity", arguments);
+        },
+    });
+})();
+(function () { // HTMLParagraphElement
+    HTMLParagraphElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLParagraphElement, "HTMLParagraphElement");
+    Object.setPrototypeOf(HTMLParagraphElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLParagraphElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParagraphElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParagraphElement.prototype", "align_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLParamElement
+    HTMLParamElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLParamElement, "HTMLParamElement");
+    Object.setPrototypeOf(HTMLParamElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLParamElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParamElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParamElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLParamElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParamElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParamElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLParamElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParamElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParamElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLParamElement.prototype, "valueType", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParamElement.prototype", "valueType_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLParamElement.prototype", "valueType_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLPictureElement
+    HTMLPictureElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLPictureElement, "HTMLPictureElement");
+    Object.setPrototypeOf(HTMLPictureElement.prototype, HTMLElement.prototype);
+})();
+(function () { // HTMLPreElement
+    HTMLPreElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLPreElement, "HTMLPreElement");
+    Object.setPrototypeOf(HTMLPreElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLPreElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLPreElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLPreElement.prototype", "width_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLProgressElement
+    HTMLProgressElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLProgressElement, "HTMLProgressElement");
+    Object.setPrototypeOf(HTMLProgressElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLProgressElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLProgressElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLProgressElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLProgressElement.prototype, "max", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLProgressElement.prototype", "max_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLProgressElement.prototype", "max_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLProgressElement.prototype, "position", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLProgressElement.prototype", "position_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLProgressElement.prototype, "labels", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLProgressElement.prototype", "labels_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // HTMLQuoteElement
+    HTMLQuoteElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLQuoteElement, "HTMLQuoteElement");
+    Object.setPrototypeOf(HTMLQuoteElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLQuoteElement.prototype, "cite", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLQuoteElement.prototype", "cite_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLQuoteElement.prototype", "cite_set", arguments);
         },
     });
 })();
@@ -5705,6 +9678,341 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+(function () { // HTMLSelectElement
+    HTMLSelectElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLSelectElement, "HTMLSelectElement");
+    Object.setPrototypeOf(HTMLSelectElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "autocomplete", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "autocomplete_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "autocomplete_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "disabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "disabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "disabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "multiple", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "multiple_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "multiple_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "required", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "required_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "required_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "size", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "size_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "size_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "type_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "options", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "options_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "length", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "length_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "length_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "selectedOptions", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "selectedOptions_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "selectedIndex", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "selectedIndex_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "selectedIndex_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "willValidate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "willValidate_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "validity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "validity_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "validationMessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "validationMessage_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "labels", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "labels_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "add", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "add", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "checkValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "checkValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "item", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "item", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "namedItem", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "namedItem", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "remove", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "remove", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "reportValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "reportValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSelectElement.prototype, "setCustomValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSelectElement.prototype", "setCustomValidity", arguments);
+        },
+    });
+})();
+(function () { // HTMLSlotElement
+    HTMLSlotElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLSlotElement, "HTMLSlotElement");
+    Object.setPrototypeOf(HTMLSlotElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLSlotElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSlotElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSlotElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSlotElement.prototype, "assign", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSlotElement.prototype", "assign", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSlotElement.prototype, "assignedElements", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSlotElement.prototype", "assignedElements", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSlotElement.prototype, "assignedNodes", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSlotElement.prototype", "assignedNodes", arguments);
+        },
+    });
+})();
+(function () { // HTMLSourceElement
+    HTMLSourceElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLSourceElement, "HTMLSourceElement");
+    Object.setPrototypeOf(HTMLSourceElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLSourceElement.prototype, "src", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "src_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "src_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSourceElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSourceElement.prototype, "srcset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "srcset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "srcset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSourceElement.prototype, "sizes", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "sizes_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "sizes_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSourceElement.prototype, "media", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "media_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "media_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSourceElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLSourceElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "height_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLSourceElement.prototype", "height_set", arguments);
+        },
+    });
+})();
 (function () { // HTMLSpanElement
     HTMLSpanElement = function () {
         return v9ng.toolsFunc.throwError('TypeError', 'Illegal constructor');
@@ -5712,7 +10020,2646 @@ ${v9ng.toolsFunc.commToString(args)}`);
     v9ng.toolsFunc.ctorGuard(HTMLSpanElement, "HTMLSpanElement");
     Object.setPrototypeOf(HTMLSpanElement.prototype, HTMLElement.prototype);
 })();
+(function () { // HTMLStyleElement
+    HTMLStyleElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLStyleElement, "HTMLStyleElement");
+    Object.setPrototypeOf(HTMLStyleElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLStyleElement.prototype, "disabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "disabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "disabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLStyleElement.prototype, "media", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "media_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "media_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLStyleElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLStyleElement.prototype, "sheet", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "sheet_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLStyleElement.prototype, "blocking", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "blocking_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLStyleElement.prototype", "blocking_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLTableCaptionElement
+    HTMLTableCaptionElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTableCaptionElement, "HTMLTableCaptionElement");
+    Object.setPrototypeOf(HTMLTableCaptionElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTableCaptionElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCaptionElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCaptionElement.prototype", "align_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLTableCellElement
+    HTMLTableCellElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTableCellElement, "HTMLTableCellElement");
+    Object.setPrototypeOf(HTMLTableCellElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "colSpan", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "colSpan_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "colSpan_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "rowSpan", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "rowSpan_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "rowSpan_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "headers", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "headers_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "headers_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "cellIndex", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "cellIndex_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "axis", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "axis_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "axis_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "height_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "height_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "ch", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "ch_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "ch_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "chOff", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "chOff_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "chOff_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "noWrap", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "noWrap_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "noWrap_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "vAlign", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "vAlign_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "vAlign_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "bgColor", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "bgColor_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "bgColor_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "abbr", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "abbr_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "abbr_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableCellElement.prototype, "scope", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "scope_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableCellElement.prototype", "scope_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLTableColElement
+    HTMLTableColElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTableColElement, "HTMLTableColElement");
+    Object.setPrototypeOf(HTMLTableColElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTableColElement.prototype, "span", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "span_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "span_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableColElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableColElement.prototype, "ch", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "ch_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "ch_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableColElement.prototype, "chOff", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "chOff_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "chOff_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableColElement.prototype, "vAlign", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "vAlign_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "vAlign_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableColElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableColElement.prototype", "width_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLTableElement
+    HTMLTableElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTableElement, "HTMLTableElement");
+    Object.setPrototypeOf(HTMLTableElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "caption", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "caption_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "caption_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "tHead", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "tHead_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "tHead_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "tFoot", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "tFoot_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "tFoot_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "tBodies", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "tBodies_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "rows", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "rows_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "border", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "border_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "border_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "frame", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "frame_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "frame_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "rules", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "rules_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "rules_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "summary", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "summary_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "summary_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "bgColor", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "bgColor_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "bgColor_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "cellPadding", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "cellPadding_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "cellPadding_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "cellSpacing", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "cellSpacing_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "cellSpacing_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "createCaption", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "createCaption", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "createTBody", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "createTBody", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "createTFoot", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "createTFoot", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "createTHead", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "createTHead", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "deleteCaption", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "deleteCaption", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "deleteRow", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "deleteRow", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "deleteTFoot", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "deleteTFoot", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "deleteTHead", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "deleteTHead", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableElement.prototype, "insertRow", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableElement.prototype", "insertRow", arguments);
+        },
+    });
+})();
+(function () { // HTMLTableRowElement
+    HTMLTableRowElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTableRowElement, "HTMLTableRowElement");
+    Object.setPrototypeOf(HTMLTableRowElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "rowIndex", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "rowIndex_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "sectionRowIndex", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "sectionRowIndex_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "cells", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "cells_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "ch", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "ch_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "ch_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "chOff", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "chOff_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "chOff_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "vAlign", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "vAlign_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "vAlign_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "bgColor", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "bgColor_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "bgColor_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "deleteCell", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "deleteCell", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableRowElement.prototype, "insertCell", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableRowElement.prototype", "insertCell", arguments);
+        },
+    });
+})();
+(function () { // HTMLTableSectionElement
+    HTMLTableSectionElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTableSectionElement, "HTMLTableSectionElement");
+    Object.setPrototypeOf(HTMLTableSectionElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTableSectionElement.prototype, "rows", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "rows_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableSectionElement.prototype, "align", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "align_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "align_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableSectionElement.prototype, "ch", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "ch_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "ch_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableSectionElement.prototype, "chOff", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "chOff_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "chOff_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableSectionElement.prototype, "vAlign", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "vAlign_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "vAlign_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableSectionElement.prototype, "deleteRow", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "deleteRow", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTableSectionElement.prototype, "insertRow", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTableSectionElement.prototype", "insertRow", arguments);
+        },
+    });
+})();
+(function () { // HTMLTemplateElement
+    HTMLTemplateElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTemplateElement, "HTMLTemplateElement");
+    Object.setPrototypeOf(HTMLTemplateElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTemplateElement.prototype, "content", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTemplateElement.prototype", "content_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTemplateElement.prototype, "shadowRoot", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTemplateElement.prototype", "shadowRoot_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTemplateElement.prototype, "shadowRootMode", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTemplateElement.prototype", "shadowRootMode_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTemplateElement.prototype", "shadowRootMode_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLTextAreaElement
+    HTMLTextAreaElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTextAreaElement, "HTMLTextAreaElement");
+    Object.setPrototypeOf(HTMLTextAreaElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "autocomplete", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "autocomplete_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "autocomplete_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "cols", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "cols_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "cols_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "dirName", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "dirName_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "dirName_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "disabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "disabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "disabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "form", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "form_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "maxLength", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "maxLength_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "maxLength_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "minLength", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "minLength_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "minLength_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "name_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "name_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "placeholder", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "placeholder_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "placeholder_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "readOnly", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "readOnly_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "readOnly_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "required", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "required_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "required_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "rows", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "rows_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "rows_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "wrap", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "wrap_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "wrap_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "type_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "defaultValue", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "defaultValue_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "defaultValue_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "value", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "value_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "value_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "textLength", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "textLength_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "willValidate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "willValidate_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "validity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "validity_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "validationMessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "validationMessage_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "labels", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "labels_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "selectionStart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "selectionStart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "selectionStart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "selectionEnd", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "selectionEnd_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "selectionEnd_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "selectionDirection", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "selectionDirection_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "selectionDirection_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "checkValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "checkValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "reportValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "reportValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "select", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "select", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "setCustomValidity", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "setCustomValidity", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "setRangeText", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "setRangeText", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTextAreaElement.prototype, "setSelectionRange", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTextAreaElement.prototype", "setSelectionRange", arguments);
+        },
+    });
+})();
+(function () { // HTMLTimeElement
+    HTMLTimeElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTimeElement, "HTMLTimeElement");
+    Object.setPrototypeOf(HTMLTimeElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTimeElement.prototype, "dateTime", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTimeElement.prototype", "dateTime_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTimeElement.prototype", "dateTime_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLTitleElement
+    HTMLTitleElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTitleElement, "HTMLTitleElement");
+    Object.setPrototypeOf(HTMLTitleElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTitleElement.prototype, "text", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTitleElement.prototype", "text_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTitleElement.prototype", "text_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLTrackElement
+    HTMLTrackElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLTrackElement, "HTMLTrackElement");
+    Object.setPrototypeOf(HTMLTrackElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement, "NONE", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 0,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement, "LOADING", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 1,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement, "LOADED", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 2,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement, "ERROR", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 3,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "kind", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "kind_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "kind_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "src", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "src_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "src_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "srclang", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "srclang_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "srclang_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "label", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "label_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "label_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "default", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "default_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "default_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "readyState", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "readyState_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "track", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLTrackElement.prototype", "track_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "NONE", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 0,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "LOADING", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 1,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "LOADED", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 2,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLTrackElement.prototype, "ERROR", {
+        configurable: false,
+        enumerable: true,
+        writable: false,
+        value: 3,
+    });
+})();
+(function () { // HTMLUListElement
+    HTMLUListElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLUListElement, "HTMLUListElement");
+    Object.setPrototypeOf(HTMLUListElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLUListElement.prototype, "compact", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLUListElement.prototype", "compact_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLUListElement.prototype", "compact_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLUListElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLUListElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLUListElement.prototype", "type_set", arguments);
+        },
+    });
+})();
+(function () { // HTMLUnknownElement
+    HTMLUnknownElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLUnknownElement, "HTMLUnknownElement");
+    Object.setPrototypeOf(HTMLUnknownElement.prototype, HTMLElement.prototype);
+})();
 // ---- HTMLElements END ----
+(function () { // HTMLAudioElement
+    HTMLAudioElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLAudioElement, "HTMLAudioElement");
+    Object.setPrototypeOf(HTMLAudioElement.prototype, HTMLMediaElement.prototype);
+})();
+(function () { // HTMLVideoElement
+    HTMLVideoElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLVideoElement, "HTMLVideoElement");
+    Object.setPrototypeOf(HTMLVideoElement.prototype, HTMLMediaElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "width_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "width_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "height_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "height_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "videoWidth", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "videoWidth_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "videoHeight", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "videoHeight_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "poster", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "poster_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "poster_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "webkitDecodedFrameCount", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "webkitDecodedFrameCount_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "webkitDroppedFrameCount", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "webkitDroppedFrameCount_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "playsInline", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "playsInline_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "playsInline_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "onenterpictureinpicture", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "onenterpictureinpicture_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "onenterpictureinpicture_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "onleavepictureinpicture", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "onleavepictureinpicture_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "onleavepictureinpicture_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "disablePictureInPicture", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "disablePictureInPicture_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "disablePictureInPicture_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "cancelVideoFrameCallback", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "cancelVideoFrameCallback", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "requestPictureInPicture", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "requestPictureInPicture", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "requestVideoFrameCallback", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "requestVideoFrameCallback", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "webkitSupportsFullscreen", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "webkitSupportsFullscreen_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "webkitDisplayingFullscreen", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "webkitDisplayingFullscreen_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "getVideoPlaybackQuality", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "getVideoPlaybackQuality", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "webkitEnterFullScreen", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "webkitEnterFullScreen", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "webkitEnterFullscreen", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "webkitEnterFullscreen", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "webkitExitFullScreen", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "webkitExitFullScreen", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLVideoElement.prototype, "webkitExitFullscreen", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLVideoElement.prototype", "webkitExitFullscreen", arguments);
+        },
+    });
+})();
+(function () { // Audio
+    Audio = function () {
+    };
+    v9ng.toolsFunc.ctorGuard(Audio, "Audio");
+    Object.setPrototypeOf(Audio.prototype, HTMLMediaElement.prototype);
+})();
+(function () { // SVGElement
+    SVGElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(SVGElement, "SVGElement");
+    Object.setPrototypeOf(SVGElement.prototype, Element.prototype);
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "className", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "className_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ownerSVGElement", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ownerSVGElement_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "viewportElement", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "viewportElement_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onbeforexrselect", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onbeforexrselect_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onbeforexrselect_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onabort", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onabort_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onabort_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onbeforeinput", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onbeforeinput_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onbeforeinput_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onblur", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onblur_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onblur_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncancel", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncancel_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncancel_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncanplay", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncanplay_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncanplay_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncanplaythrough", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncanplaythrough_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncanplaythrough_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onclick", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onclick_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onclick_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onclose", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onclose_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onclose_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncontextlost", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncontextlost_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncontextlost_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncontextmenu", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncontextmenu_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncontextmenu_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncontextrestored", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncontextrestored_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncontextrestored_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncuechange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncuechange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncuechange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondblclick", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondblclick_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondblclick_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondrag", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondrag_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondrag_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondragend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondragenter", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragenter_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragenter_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondragleave", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragleave_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragleave_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondragover", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragover_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragover_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondragstart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragstart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondragstart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondrop", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondrop_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondrop_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ondurationchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondurationchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ondurationchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onemptied", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onemptied_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onemptied_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onended", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onended_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onended_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onerror_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onfocus", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onfocus_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onfocus_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onformdata", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onformdata_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onformdata_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oninput", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oninput_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oninput_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oninvalid", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oninvalid_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oninvalid_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onkeydown", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onkeydown_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onkeydown_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onkeypress", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onkeypress_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onkeypress_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onkeyup", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onkeyup_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onkeyup_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onload", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onload_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onload_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onloadeddata", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onloadeddata_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onloadeddata_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onloadedmetadata", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onloadedmetadata_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onloadedmetadata_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onloadstart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onloadstart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onloadstart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onmousedown", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmousedown_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmousedown_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onmouseenter", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseenter_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseenter_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onmouseleave", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseleave_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseleave_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onmousemove", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmousemove_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmousemove_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onmouseout", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseout_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseout_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onmouseover", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseover_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseover_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onmouseup", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseup_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmouseup_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onmousewheel", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmousewheel_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onmousewheel_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpause", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpause_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpause_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onplay", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onplay_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onplay_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onplaying", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onplaying_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onplaying_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onprogress", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onprogress_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onprogress_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onratechange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onratechange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onratechange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onreset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onreset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onreset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onresize", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onresize_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onresize_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onscroll", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onscroll_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onscroll_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onsecuritypolicyviolation", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onsecuritypolicyviolation_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onsecuritypolicyviolation_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onseeked", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onseeked_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onseeked_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onseeking", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onseeking_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onseeking_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onselect", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onselect_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onselect_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onslotchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onslotchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onslotchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onstalled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onstalled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onstalled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onsubmit", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onsubmit_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onsubmit_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onsuspend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onsuspend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onsuspend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ontimeupdate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontimeupdate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontimeupdate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ontoggle", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontoggle_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontoggle_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onvolumechange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onvolumechange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onvolumechange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onwaiting", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwaiting_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwaiting_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onwebkitanimationend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwebkitanimationend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwebkitanimationend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onwebkitanimationiteration", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwebkitanimationiteration_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwebkitanimationiteration_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onwebkitanimationstart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwebkitanimationstart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwebkitanimationstart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onwebkittransitionend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwebkittransitionend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwebkittransitionend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onwheel", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwheel_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onwheel_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onauxclick", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onauxclick_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onauxclick_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ongotpointercapture", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ongotpointercapture_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ongotpointercapture_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onlostpointercapture", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onlostpointercapture_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onlostpointercapture_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointerdown", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerdown_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerdown_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointermove", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointermove_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointermove_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointerrawupdate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerrawupdate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerrawupdate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointerup", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerup_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerup_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointercancel", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointercancel_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointercancel_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointerover", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerover_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerover_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointerout", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerout_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerout_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointerenter", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerenter_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerenter_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpointerleave", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerleave_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpointerleave_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onselectstart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onselectstart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onselectstart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onselectionchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onselectionchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onselectionchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onanimationend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onanimationend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onanimationend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onanimationiteration", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onanimationiteration_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onanimationiteration_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onanimationstart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onanimationstart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onanimationstart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ontransitionrun", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontransitionrun_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontransitionrun_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ontransitionstart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontransitionstart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontransitionstart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ontransitionend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontransitionend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontransitionend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "ontransitioncancel", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontransitioncancel_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "ontransitioncancel_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncopy", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncopy_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncopy_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncut", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncut_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncut_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onpaste", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpaste_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onpaste_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "dataset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "dataset_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "nonce", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "nonce_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "nonce_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "autofocus", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "autofocus_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "autofocus_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "tabIndex", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "tabIndex_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "tabIndex_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "style", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "style_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "style_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "attributeStyleMap", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "attributeStyleMap_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "blur", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "blur", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "focus", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "focus", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "oncontentvisibilityautostatechange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncontentvisibilityautostatechange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "oncontentvisibilityautostatechange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onscrollend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onscrollend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onscrollend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onbeforematch", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onbeforematch_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onbeforematch_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGElement.prototype, "onbeforetoggle", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onbeforetoggle_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGElement.prototype", "onbeforetoggle_set", arguments);
+        },
+    });
+})();
+(function () { // SVGGraphicsElement
+    SVGGraphicsElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(SVGGraphicsElement, "SVGGraphicsElement");
+    Object.setPrototypeOf(SVGGraphicsElement.prototype, SVGElement.prototype);
+    v9ng.toolsFunc.defineProperty(SVGGraphicsElement.prototype, "transform", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGGraphicsElement.prototype", "transform_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGGraphicsElement.prototype, "nearestViewportElement", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGGraphicsElement.prototype", "nearestViewportElement_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGGraphicsElement.prototype, "farthestViewportElement", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGGraphicsElement.prototype", "farthestViewportElement_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGGraphicsElement.prototype, "requiredExtensions", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGGraphicsElement.prototype", "requiredExtensions_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGGraphicsElement.prototype, "systemLanguage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGGraphicsElement.prototype", "systemLanguage_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGGraphicsElement.prototype, "getBBox", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGGraphicsElement.prototype", "getBBox", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGGraphicsElement.prototype, "getCTM", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGGraphicsElement.prototype", "getCTM", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SVGGraphicsElement.prototype, "getScreenCTM", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGGraphicsElement.prototype", "getScreenCTM", arguments);
+        },
+    });
+})();
+(function () { // SVGPatternElement
+    SVGPatternElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(SVGPatternElement, "SVGPatternElement");
+    Object.setPrototypeOf(SVGPatternElement.prototype, SVGElement.prototype);
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "patternUnits", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "patternUnits_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "patternContentUnits", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "patternContentUnits_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "patternTransform", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "patternTransform_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "x", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "x_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "y", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "y_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "width", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "width_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "height", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "height_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "viewBox", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "viewBox_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "preserveAspectRatio", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "preserveAspectRatio_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "href", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "href_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "requiredExtensions", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "requiredExtensions_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SVGPatternElement.prototype, "systemLanguage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SVGPatternElement.prototype", "systemLanguage_get", arguments);
+        },
+        set: undefined,
+    });
+})();
 (function () { // Document
     Document = function () {
     };
@@ -7861,6 +14808,18 @@ ${v9ng.toolsFunc.commToString(args)}`);
 (function () { // document
     document = {};
     Object.setPrototypeOf(document, HTMLDocument.prototype);
+    Object.defineProperty(document, v9ng.cache.domSymbol, {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: jsDocument,
+    });
+    Object.defineProperty(jsDocument, v9ng.cache.ptrSymbol, {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: document,
+    });
     v9ng.toolsFunc.defineProperty(document, "location", {
         configurable: false,
         enumerable: true,
@@ -7871,6 +14830,156 @@ ${v9ng.toolsFunc.commToString(args)}`);
             return v9ng.toolsFunc.funcDispatch(this, "document", "location_set", arguments);
         },
     });
+})();
+(function () { // CharacterData
+    CharacterData = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(CharacterData, "CharacterData");
+    Object.setPrototypeOf(CharacterData.prototype, Node.prototype);
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "data", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "data_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "data_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "length", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "length_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "previousElementSibling", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "previousElementSibling_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "nextElementSibling", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "nextElementSibling_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "after", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "after", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "appendData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "appendData", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "before", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "before", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "deleteData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "deleteData", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "insertData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "insertData", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "remove", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "remove", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "replaceData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "replaceData", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "replaceWith", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "replaceWith", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(CharacterData.prototype, "substringData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CharacterData.prototype", "substringData", arguments);
+        },
+    });
+})();
+(function () { // Text
+    Text = function () {
+    };
+    v9ng.toolsFunc.ctorGuard(Text, "Text");
+    Object.setPrototypeOf(Text.prototype, CharacterData.prototype);
+    v9ng.toolsFunc.defineProperty(Text.prototype, "wholeText", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Text.prototype", "wholeText_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Text.prototype, "assignedSlot", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Text.prototype", "assignedSlot_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Text.prototype, "splitText", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Text.prototype", "splitText", arguments);
+        },
+    });
+})();
+(function () { // CDATASection
+    CDATASection = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(CDATASection, "CDATASection");
+    Object.setPrototypeOf(CDATASection.prototype, Text.prototype);
 })();
 (function () { // Storage
     Storage = function () {
@@ -8616,6 +15725,1490 @@ ${v9ng.toolsFunc.commToString(args)}`);
         value: function () {
             return v9ng.toolsFunc.funcDispatch(this, "location", "toString", arguments);
         },
+    });
+})();
+(function () { // Request
+    Request = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'Request': 1 argument required, but only 0 present.");
+    };
+    v9ng.toolsFunc.ctorGuard(Request, "Request");
+    v9ng.toolsFunc.defineProperty(Request.prototype, "method", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "method_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "url", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "url_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "headers", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "headers_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "destination", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "destination_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "referrer", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "referrer_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "referrerPolicy", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "referrerPolicy_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "mode", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "mode_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "credentials", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "credentials_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "cache", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "cache_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "redirect", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "redirect_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "integrity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "integrity_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "keepalive", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "keepalive_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "signal", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "signal_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "isHistoryNavigation", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "isHistoryNavigation_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "bodyUsed", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "bodyUsed_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "arrayBuffer", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "arrayBuffer", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "blob", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "blob", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "clone", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "clone", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "formData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "formData", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "json", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "json", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "text", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "text", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Request.prototype, "body", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Request.prototype", "body_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // PaymentResponse
+    PaymentResponse = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(PaymentResponse, "PaymentResponse");
+    Object.setPrototypeOf(PaymentResponse.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "requestId", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "requestId_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "methodName", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "methodName_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "details", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "details_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "shippingAddress", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "shippingAddress_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "shippingOption", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "shippingOption_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "payerName", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "payerName_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "payerEmail", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "payerEmail_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "payerPhone", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "payerPhone_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "onpayerdetailchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "onpayerdetailchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "onpayerdetailchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "complete", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "complete", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "retry", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "retry", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(PaymentResponse.prototype, "toJSON", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PaymentResponse.prototype", "toJSON", arguments);
+        },
+    });
+})();
+(function () { // Notification
+    Notification = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'Notification': 1 argument required, but only 0 present.");
+    };
+    v9ng.toolsFunc.ctorGuard(Notification, "Notification");
+    Object.setPrototypeOf(Notification.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(Notification, "permission", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification", "permission_get", arguments, "default");
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification, "maxActions", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification", "maxActions_get", arguments, 2);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification, "requestPermission", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification", "requestPermission", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "onclick", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "onclick_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "onclick_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "onshow", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "onshow_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "onshow_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "onerror_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "onerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "onclose", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "onclose_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "onclose_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "title", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "title_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "dir", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "dir_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "lang", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "lang_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "body", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "body_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "tag", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "tag_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "icon", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "icon_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "badge", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "badge_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "vibrate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "vibrate_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "timestamp", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "timestamp_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "renotify", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "renotify_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "silent", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "silent_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "requireInteraction", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "requireInteraction_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "data", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "data_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "actions", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "actions_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "close", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "close", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Notification.prototype, "image", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Notification.prototype", "image_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // SourceBuffer
+    SourceBuffer = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(SourceBuffer, "SourceBuffer");
+    Object.setPrototypeOf(SourceBuffer.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "mode", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "mode_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "mode_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "updating", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "updating_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "buffered", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "buffered_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "timestampOffset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "timestampOffset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "timestampOffset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "appendWindowStart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "appendWindowStart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "appendWindowStart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "appendWindowEnd", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "appendWindowEnd_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "appendWindowEnd_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "onupdatestart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onupdatestart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onupdatestart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "onupdate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onupdate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onupdate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "onupdateend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onupdateend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onupdateend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onerror_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "onabort", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onabort_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "onabort_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "abort", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "abort", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "appendBuffer", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "appendBuffer", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "changeType", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "changeType", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SourceBuffer.prototype, "remove", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SourceBuffer.prototype", "remove", arguments);
+        },
+    });
+})();
+(function () { // External
+    External = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(External, "External");
+    v9ng.toolsFunc.defineProperty(External.prototype, "AddSearchProvider", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "External.prototype", "AddSearchProvider", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(External.prototype, "IsSearchProviderInstalled", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "External.prototype", "IsSearchProviderInstalled", arguments);
+        },
+    });
+})();
+(function () { // external
+    external = {};
+    Object.setPrototypeOf(external, External.prototype);
+})();
+(function () { // chrome
+    chrome = {};
+    v9ng.toolsFunc.defineProperty(chrome, "loadTimes", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "chrome", "loadTimes", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(chrome, "csi", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "chrome", "csi", arguments);
+        },
+    });
+    const app = {};
+    v9ng.toolsFunc.defineProperty(app, "isInstalled", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: false,
+    });
+    v9ng.toolsFunc.defineProperty(app, "getDetails", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "app", "getDetails", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(app, "getIsInstalled", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "app", "getIsInstalled", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(app, "installState", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "app", "installState", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(app, "runningState", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "app", "runningState", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(app, "InstallState", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: {},
+    });
+    v9ng.toolsFunc.defineProperty(app, "RunningState", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: {},
+    });
+    v9ng.toolsFunc.defineProperty(chrome, "app", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: app,
+    });
+})();
+(function () { // History
+    History = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(History, "History");
+    v9ng.toolsFunc.defineProperty(History.prototype, "length", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "length_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(History.prototype, "scrollRestoration", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "scrollRestoration_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "scrollRestoration_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(History.prototype, "state", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "state_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(History.prototype, "back", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "back", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(History.prototype, "forward", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "forward", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(History.prototype, "go", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "go", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(History.prototype, "pushState", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "pushState", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(History.prototype, "replaceState", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "History.prototype", "replaceState", arguments);
+        },
+    });
+})();
+(function () { // history
+    history = {};
+    Object.setPrototypeOf(history, History.prototype);
+    v9ng.toolsFunc.defineProperty(history, "pushState", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "history", "pushState", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(history, "replaceState", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "history", "replaceState", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(history, "go", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "history", "go", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(history, "back", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "history", "back", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(history, "forward", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "history", "forward", arguments);
+        },
+    });
+})();
+(function () { // Performance
+    Performance = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(Performance, "Performance");
+    Object.setPrototypeOf(Performance.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "timeOrigin", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "timeOrigin_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "onresourcetimingbufferfull", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "onresourcetimingbufferfull_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "onresourcetimingbufferfull_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "clearMarks", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "clearMarks", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "clearMeasures", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "clearMeasures", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "clearResourceTimings", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "clearResourceTimings", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "getEntries", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "getEntries", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "getEntriesByName", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "getEntriesByName", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "getEntriesByType", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "getEntriesByType", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "mark", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "mark", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "measure", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "measure", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "now", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "now", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "setResourceTimingBufferSize", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "setResourceTimingBufferSize", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "toJSON", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "toJSON", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "timing", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "timing_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "navigation", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "navigation_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "memory", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "memory_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(Performance.prototype, "eventCounts", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Performance.prototype", "eventCounts_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // performance
+    performance = {};
+    Object.setPrototypeOf(performance, Performance.prototype);
+    v9ng.toolsFunc.defineProperty(performance, "clearResourceTimings", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "performance", "clearResourceTimings", arguments);
+        },
+    });
+})();
+(function () { // SpeechSynthesisUtterance
+    SpeechSynthesisUtterance = function () {
+    };
+    v9ng.toolsFunc.ctorGuard(SpeechSynthesisUtterance, "SpeechSynthesisUtterance");
+    Object.setPrototypeOf(SpeechSynthesisUtterance.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "text", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "text_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "text_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "lang", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "lang_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "lang_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "voice", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "voice_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "voice_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "volume", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "volume_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "volume_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "rate", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "rate_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "rate_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "pitch", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "pitch_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "pitch_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "onstart", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onstart_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onstart_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "onend", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onend_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onend_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onerror_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "onpause", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onpause_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onpause_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "onresume", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onresume_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onresume_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "onmark", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onmark_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onmark_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(SpeechSynthesisUtterance.prototype, "onboundary", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onboundary_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "SpeechSynthesisUtterance.prototype", "onboundary_set", arguments);
+        },
+    });
+})();
+(function () { // TextTrackList
+    TextTrackList = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(TextTrackList, "TextTrackList");
+    Object.setPrototypeOf(TextTrackList.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(TextTrackList.prototype, "length", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "TextTrackList.prototype", "length_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(TextTrackList.prototype, "onchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "TextTrackList.prototype", "onchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "TextTrackList.prototype", "onchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(TextTrackList.prototype, "onaddtrack", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "TextTrackList.prototype", "onaddtrack_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "TextTrackList.prototype", "onaddtrack_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(TextTrackList.prototype, "onremovetrack", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "TextTrackList.prototype", "onremovetrack_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "TextTrackList.prototype", "onremovetrack_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(TextTrackList.prototype, "getTrackById", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "TextTrackList.prototype", "getTrackById", arguments);
+        },
+    });
+})();
+(function () { // IDBFactory
+    IDBFactory = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(IDBFactory, "IDBFactory");
+    v9ng.toolsFunc.defineProperty(IDBFactory.prototype, "cmp", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBFactory.prototype", "cmp", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBFactory.prototype, "databases", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBFactory.prototype", "databases", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBFactory.prototype, "deleteDatabase", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBFactory.prototype", "deleteDatabase", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBFactory.prototype, "open", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBFactory.prototype", "open", arguments);
+        },
+    });
+})();
+
+(function () { // indexedDB
+    indexedDB = {};
+    Object.setPrototypeOf(indexedDB, IDBFactory.prototype);
+})();
+(function () { // IDBRequest
+    IDBRequest = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(IDBRequest, "IDBRequest");
+    Object.setPrototypeOf(IDBRequest.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(IDBRequest.prototype, "result", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "result_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(IDBRequest.prototype, "error", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "error_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(IDBRequest.prototype, "source", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "source_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(IDBRequest.prototype, "transaction", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "transaction_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(IDBRequest.prototype, "readyState", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "readyState_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(IDBRequest.prototype, "onsuccess", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "onsuccess_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "onsuccess_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBRequest.prototype, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "onerror_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBRequest.prototype", "onerror_set", arguments);
+        },
+    });
+})();
+(function () { // IDBOpenDBRequest
+    IDBOpenDBRequest = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(IDBOpenDBRequest, "IDBOpenDBRequest");
+    Object.setPrototypeOf(IDBOpenDBRequest.prototype, IDBRequest.prototype);
+    v9ng.toolsFunc.defineProperty(IDBOpenDBRequest.prototype, "onblocked", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBOpenDBRequest.prototype", "onblocked_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBOpenDBRequest.prototype", "onblocked_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBOpenDBRequest.prototype, "onupgradeneeded", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBOpenDBRequest.prototype", "onupgradeneeded_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBOpenDBRequest.prototype", "onupgradeneeded_set", arguments);
+        },
+    });
+})();
+(function () { // IDBDatabase
+    IDBDatabase = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(IDBDatabase, "IDBDatabase");
+    Object.setPrototypeOf(IDBDatabase.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "name_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "version", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "version_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "objectStoreNames", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "objectStoreNames_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "onabort", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "onabort_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "onabort_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "onclose", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "onclose_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "onclose_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "onerror_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "onerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "onversionchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "onversionchange_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "onversionchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "close", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "close", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "createObjectStore", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "createObjectStore", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "deleteObjectStore", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "deleteObjectStore", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(IDBDatabase.prototype, "transaction", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "IDBDatabase.prototype", "transaction", arguments);
+        },
+    });
+})();
+(function () { // NetworkInformation
+    NetworkInformation = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(NetworkInformation, "NetworkInformation");
+    Object.setPrototypeOf(NetworkInformation.prototype, EventTarget.prototype);
+    v9ng.toolsFunc.defineProperty(NetworkInformation.prototype, "onchange", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "NetworkInformation.prototype", "onchange_get", arguments, null);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "NetworkInformation.prototype", "onchange_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(NetworkInformation.prototype, "effectiveType", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "NetworkInformation.prototype", "effectiveType_get", arguments, "4g");
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(NetworkInformation.prototype, "rtt", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "NetworkInformation.prototype", "rtt_get", arguments, 100);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(NetworkInformation.prototype, "downlink", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "NetworkInformation.prototype", "downlink_get", arguments, 1.55);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(NetworkInformation.prototype, "saveData", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "NetworkInformation.prototype", "saveData_get", arguments, false);
+        },
+        set: undefined,
     });
 })();
 (function () { // HTMLCollection
@@ -9523,6 +18116,770 @@ ${v9ng.toolsFunc.commToString(args)}`);
             return v9ng.toolsFunc.funcDispatch(this, "CanvasRenderingContext2D.prototype", "strokeRect", arguments);
         },
     });
+})();
+(function () { // OffscreenCanvasRenderingContext2D
+    OffscreenCanvasRenderingContext2D = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(OffscreenCanvasRenderingContext2D, "OffscreenCanvasRenderingContext2D");
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "canvas", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "canvas_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "globalAlpha", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "globalAlpha_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "globalAlpha_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "globalCompositeOperation", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "globalCompositeOperation_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "globalCompositeOperation_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "filter", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "filter_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "filter_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "imageSmoothingEnabled", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "imageSmoothingEnabled_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "imageSmoothingEnabled_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "imageSmoothingQuality", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "imageSmoothingQuality_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "imageSmoothingQuality_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "strokeStyle", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "strokeStyle_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "strokeStyle_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "fillStyle", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fillStyle_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fillStyle_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "shadowOffsetX", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "shadowOffsetX_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "shadowOffsetX_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "shadowOffsetY", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "shadowOffsetY_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "shadowOffsetY_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "shadowBlur", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "shadowBlur_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "shadowBlur_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "shadowColor", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "shadowColor_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "shadowColor_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "lineWidth", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineWidth_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineWidth_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "lineCap", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineCap_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineCap_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "lineJoin", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineJoin_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineJoin_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "miterLimit", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "miterLimit_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "miterLimit_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "lineDashOffset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineDashOffset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineDashOffset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "font", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "font_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "font_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "textAlign", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "textAlign_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "textAlign_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "textBaseline", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "textBaseline_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "textBaseline_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "direction", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "direction_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "direction_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "fontKerning", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fontKerning_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fontKerning_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "fontStretch", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fontStretch_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fontStretch_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "fontVariantCaps", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fontVariantCaps_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fontVariantCaps_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "letterSpacing", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "letterSpacing_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "letterSpacing_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "textRendering", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "textRendering_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "textRendering_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "wordSpacing", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "wordSpacing_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "wordSpacing_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "clip", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "clip", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "createConicGradient", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "createConicGradient", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "createImageData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "createImageData", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "createLinearGradient", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "createLinearGradient", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "createPattern", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "createPattern", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "createRadialGradient", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "createRadialGradient", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "drawImage", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "drawImage", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "fill", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fill", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "fillText", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fillText", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "getImageData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "getImageData", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "getLineDash", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "getLineDash", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "getTransform", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "getTransform", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "isContextLost", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "isContextLost", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "isPointInPath", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "isPointInPath", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "isPointInStroke", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "isPointInStroke", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "measureText", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "measureText", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "putImageData", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "putImageData", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "reset", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "reset", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "roundRect", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "roundRect", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "save", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "save", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "scale", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "scale", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "setLineDash", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "setLineDash", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "setTransform", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "setTransform", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "stroke", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "stroke", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "strokeText", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "strokeText", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "transform", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "transform", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "translate", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "translate", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "arc", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "arc", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "arcTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "arcTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "beginPath", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "beginPath", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "bezierCurveTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "bezierCurveTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "clearRect", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "clearRect", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "closePath", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "closePath", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "ellipse", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "ellipse", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "fillRect", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "fillRect", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "lineTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "lineTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "moveTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "moveTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "quadraticCurveTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "quadraticCurveTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "rect", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "rect", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "resetTransform", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "resetTransform", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "restore", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "restore", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "rotate", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "rotate", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(OffscreenCanvasRenderingContext2D.prototype, "strokeRect", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "OffscreenCanvasRenderingContext2D.prototype", "strokeRect", arguments);
+        },
+    });
+})();
+(function () { // Path2D
+    Path2D = function () {
+    };
+    v9ng.toolsFunc.ctorGuard(Path2D, "Path2D");
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "addPath", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "addPath", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "roundRect", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "roundRect", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "arc", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "arc", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "arcTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "arcTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "bezierCurveTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "bezierCurveTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "closePath", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "closePath", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "ellipse", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "ellipse", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "lineTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "lineTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "moveTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "moveTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "quadraticCurveTo", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "quadraticCurveTo", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(Path2D.prototype, "rect", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "Path2D.prototype", "rect", arguments);
+        },
+    });
+})();
+(function () { // PerformanceEntry
+    PerformanceEntry = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(PerformanceEntry, "PerformanceEntry");
+    v9ng.toolsFunc.defineProperty(PerformanceEntry.prototype, "name", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PerformanceEntry.prototype", "name_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PerformanceEntry.prototype, "entryType", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PerformanceEntry.prototype", "entryType_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PerformanceEntry.prototype, "startTime", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PerformanceEntry.prototype", "startTime_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PerformanceEntry.prototype, "duration", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PerformanceEntry.prototype", "duration_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PerformanceEntry.prototype, "toJSON", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PerformanceEntry.prototype", "toJSON", arguments);
+        },
+    });
+})();
+(function () { // PerformancePaintTiming
+    PerformancePaintTiming = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(PerformancePaintTiming, "PerformancePaintTiming");
+    Object.setPrototypeOf(PerformancePaintTiming.prototype, PerformanceEntry.prototype);
 })();
 (function () { // WebGLRenderingContext
     WebGLRenderingContext = function () {
@@ -14810,6 +24167,154 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+// ---- Events BEGIN ----
+(function () { // BeforeInstallPromptEvent
+    BeforeInstallPromptEvent = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'BeforeInstallPromptEvent': 1 argument required, but only 0 present.");
+    };
+    v9ng.toolsFunc.ctorGuard(BeforeInstallPromptEvent, "BeforeInstallPromptEvent");
+    Object.setPrototypeOf(BeforeInstallPromptEvent.prototype, Event.prototype);
+    v9ng.toolsFunc.defineProperty(BeforeInstallPromptEvent.prototype, "platforms", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "BeforeInstallPromptEvent.prototype", "platforms_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(BeforeInstallPromptEvent.prototype, "userChoice", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "BeforeInstallPromptEvent.prototype", "userChoice_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(BeforeInstallPromptEvent.prototype, "prompt", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "BeforeInstallPromptEvent.prototype", "prompt", arguments);
+        },
+    });
+})();
+(function () { // CloseEvent
+    CloseEvent = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'CloseEvent': 1 argument required, but only 0 present.");
+    };
+    v9ng.toolsFunc.ctorGuard(CloseEvent, "CloseEvent");
+    Object.setPrototypeOf(CloseEvent.prototype, Event.prototype);
+    v9ng.toolsFunc.defineProperty(CloseEvent.prototype, "wasClean", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CloseEvent.prototype", "wasClean_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(CloseEvent.prototype, "code", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CloseEvent.prototype", "code_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(CloseEvent.prototype, "reason", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "CloseEvent.prototype", "reason_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // DeviceOrientationEvent
+    DeviceOrientationEvent = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'DeviceOrientationEvent': 1 argument required, but only 0 present.");
+    };
+    v9ng.toolsFunc.ctorGuard(DeviceOrientationEvent, "DeviceOrientationEvent");
+    Object.setPrototypeOf(DeviceOrientationEvent.prototype, Event.prototype);
+    v9ng.toolsFunc.defineProperty(DeviceOrientationEvent.prototype, "alpha", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "DeviceOrientationEvent.prototype", "alpha_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(DeviceOrientationEvent.prototype, "beta", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "DeviceOrientationEvent.prototype", "beta_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(DeviceOrientationEvent.prototype, "gamma", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "DeviceOrientationEvent.prototype", "gamma_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(DeviceOrientationEvent.prototype, "absolute", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "DeviceOrientationEvent.prototype", "absolute_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // MediaEncryptedEvent
+    MediaEncryptedEvent = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'MediaEncryptedEvent': 1 argument required, but only 0 present.");
+    };
+    v9ng.toolsFunc.ctorGuard(MediaEncryptedEvent, "MediaEncryptedEvent");
+    Object.setPrototypeOf(MediaEncryptedEvent.prototype, Event.prototype);
+    v9ng.toolsFunc.defineProperty(MediaEncryptedEvent.prototype, "initDataType", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "MediaEncryptedEvent.prototype", "initDataType_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(MediaEncryptedEvent.prototype, "initData", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "MediaEncryptedEvent.prototype", "initData_get", arguments);
+        },
+        set: undefined,
+    });
+})();
+(function () { // PresentationConnectionCloseEvent
+    PresentationConnectionCloseEvent = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'PresentationConnectionCloseEvent': 2 arguments required, but only 0 present.");
+    };
+    v9ng.toolsFunc.ctorGuard(PresentationConnectionCloseEvent, "PresentationConnectionCloseEvent");
+    Object.setPrototypeOf(PresentationConnectionCloseEvent.prototype, Event.prototype);
+    v9ng.toolsFunc.defineProperty(PresentationConnectionCloseEvent.prototype, "reason", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PresentationConnectionCloseEvent.prototype", "reason_get", arguments);
+        },
+        set: undefined,
+    });
+    v9ng.toolsFunc.defineProperty(PresentationConnectionCloseEvent.prototype, "message", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "PresentationConnectionCloseEvent.prototype", "message_get", arguments);
+        },
+        set: undefined,
+    });
+})();
 (function () { // UIEvent
     UIEvent = function () {
         return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'UIEvent': 1 argument required, but only 0 present.");
@@ -14857,6 +24362,7 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+// ---- Events END ----
 (function () { // MouseEvent
     MouseEvent = function () {
         return v9ng.toolsFunc.throwError('TypeError', "Failed to construct 'MouseEvent': 1 argument required, but only 0 present.");
@@ -15064,6 +24570,19 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+(function () { // DOMParser
+    DOMParser = function () {
+    };
+    v9ng.toolsFunc.ctorGuard(DOMParser, "DOMParser");
+    v9ng.toolsFunc.defineProperty(DOMParser.prototype, "parseFromString", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "DOMParser.prototype", "parseFromString", arguments);
+        },
+    });
+})();
 (function () { // window
     delete global;
     delete Buffer;
@@ -15076,6 +24595,8 @@ ${v9ng.toolsFunc.commToString(args)}`);
     // delete VM2_INTERNAL_STATE_DO_NOT_USE_OR_PROGRAM_WILL_FAIL;
     delete globalThis[Symbol.toStringTag];
     delete WindowProperties;
+    delete jsDocument;
+    delete jsLocation;
     window = globalThis;
     Object.setPrototypeOf(window, Window.prototype);
     v9ng.toolsFunc.defineProperty(window, "atob", {
@@ -15139,6 +24660,76 @@ ${v9ng.toolsFunc.commToString(args)}`);
         writable: true,
         value: function () {
             return v9ng.toolsFunc.funcDispatch(this, "window", "clearTimeout", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "setInterval", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "setInterval", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "clearInterval", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "clearInterval", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "clientInformation", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "clientInformation_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "clientInformation_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "fetch", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "fetch", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "onerror_get", arguments, null);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "onerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "onmessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "onmessage_get", arguments, null);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "onmessage_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "openDatabase", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "openDatabase", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "webkitRequestFileSystem", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "webkitRequestFileSystem", arguments);
         },
     });
     eval = v9ng.toolsFunc.funcHook(eval, undefined, false, v9ng.toolsFunc.noopFunc, v9ng.toolsFunc.noopFunc);
@@ -15238,64 +24829,19 @@ ${v9ng.toolsFunc.commToString(args)}`);
     })();
 })();
 /* Custom Code For Project */
-(function () {
-    const onLeaveForTime = function (obj) {
-        obj.result = 1692273852950;
-    };
+// (function () {
+//     const onLeaveForTime = function (obj) {
+//         obj.result = 1692273852950;
+//     };
 
-    const onLeaveForRandom = function (obj) {
-        obj.result = 0.3141592653589793;
-    };
+//     const onLeaveForRandom = function (obj) {
+//         obj.result = 0.3141592653589793;
+//     };
 
-    Date.now = v9ng.toolsFunc.funcHook(Date.now, undefined, false, v9ng.toolsFunc.noopFunc, onLeaveForTime);
-    Date.prototype.getTime = v9ng.toolsFunc.funcHook(Date.prototype.getTime, undefined, false, v9ng.toolsFunc.noopFunc, onLeaveForTime);
-    Math.random = v9ng.toolsFunc.funcHook(Math.random, undefined, false, v9ng.toolsFunc.noopFunc, onLeaveForRandom);
-
-    let metaTag = document.createElement("meta");
-    metaTag.content = "---- CONTENT ----";
-    let headTag = document.createElement("head");
-    v9ng.toolsFunc.setProtoProp.call(metaTag, "parentNode", headTag);
-    // let bodyTag = document.createElement("body");
-    document.createElement("body");
-    let scriptTag0 = document.createElement("script");
-    scriptTag0.type = "text/javascript";
-    scriptTag0.charset = "iso-8859-1";
-    scriptTag0.src="http://www.fangdi.com.cn/4QbVtADbnLVIc/d.FxJzG50F.dfe1675.js";
-    scriptTag0.r="m";
-    debugger;
-
-    location.protocol = 'https:';
-    location.hostname = '10.26.20.10';
-
-    v9ng.envmtImpl.Element_prototype$innerHTML_set = function (htmlStr) {
-        // <span lang="zh" style="font-family:mmll;font-size:160px">fontTest</span>
-        let style = {
-            "font-size": "160px",
-            "font-family": "mmll",
-        };
-        style = v9ng.toolsFunc.createProxyObj(style, CSSStyleDeclaration, "style");
-        let tagJson = {
-            "type": "span",
-            "prop": {
-                "lang": "zh",
-                "style": style,
-                "textContent": "fontTest",
-            }
-        }
-        let span = document.createElement(tagJson["type"]);
-        for (const key in tagJson["prop"]) {
-            v9ng.toolsFunc.setProtoProp.call(span, key, tagJson["prop"][key]);
-        }
-        let collection = [];
-        collection.push(span);
-        collection = v9ng.toolsFunc.createProxyObj(collection, HTMLCollection, "HTMLCollection");
-        v9ng.toolsFunc.setProtoProp.call(this, "children", collection);
-    };
-
-    v9ng.cache.canvas_2d = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAB9AAAADICAYAAACwGnoBAAAAAXNSR0IArs4c6QAAIABJREFUeF7t3VGIbddZB/BvT4TEtkSJkd4HKVKLBBT7IhWs6EUCiXkSLblgY8XY3N4rmKSUIAhitSKUIk3ykEwm6aWapHKDlvoSEggSS/viQ2mhpXmIhQYfErgIlqQmYGbLOmf2OXv2nJk5c9fZZ85a8ztP957Za+21ft+eefnvtVYTPgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgEA0DM6eQHsx2rM364hmx/N+FutuzgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgSWFRCgLytV0XUC9IqKaSoECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECKxMoLwA/b6dx6NpL0XEK/Fu89dxQ/tP0TZ3xpMXX1yZSr+jdL/0efLi5fjU9oejbV6KtrlntPule/3hP743bnr7uYh4bXLfVX32xv9CPHrrHfG9lfT6nfi5uD0+Hc/ElVhVnysZ2IJOTmUF+sUn7o+Iv4ymvT2euPSdseamXwIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIE8gUWB+iffPL9sbX7ckTcNrvFmCH1svOYhpGXY3frfDx13xtx384d0bQvCNCXBBSgr/+FEQH6kg+nywgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAicvsDBQHEa+D1yIJSersT+2qgrr4/zmI7hA/H2TXfH059467jLV/JzK9CPZCxuBfr0pYtnrAhfyW+HTggQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUJbA/QN/0cFGAnvfwWYHe7O1aIEDPe5K0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFClwDxA787dbtoXY+dTjy6c7aKzubvt3tvm5dl53fPvHoyt3df3zg1/KJr2z2fbwqct4dvm24Ot4h9YeO/FW8pvx9bu9oEzyefzuKs3h3m//TmkC6bnqU9/3p1xHnHrpG3bbM/62H8GempzbzTt9B5t8/y+VfEHx/vKbNv5/v2b9vuT1f7Tz+JrujPQ52e/LzZKPSw5/nQG+rn4n4Vnl6cV5RfiYlyNnXg9firuiXsn55s/GHfHK3FuMtBL8fV4PJ6d/Ltbgb4dz8aV+Gg8H7984Jr0xeX4eGzHb05+dld8N56LnXhvvLPvMXsrboy742J8IP571n+64I24Oc7HZ+Jy/HvcH/82+383nq6/N+PGyXUfjGuz/ru26bvn41eeitj9ZO+m145ciT43n9anbR6Mpn0kmvbC5DzztFtD29yxr/ZdDdrmnsluDf2XUt694fUDRyNMB3P0OKr802NSBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBDZPYB6gD4O/w8Y6DA3noe21WUg8/e6x2N36vbjh3XOTkDuFhN3Z5d028f3gcJmzoocr0IdjPjrMnwb8/YC9f677fB6fm4X48+3stydt59ek4P32SYg6v+cPZkHqxSf+Ina3vjQ5p30emMfk5+lz09vP7YXv0zB8OO7hiwqHbavfr9EJxp8C9N+IVxeG1Snofi1umQTQ34gPxZ1xf9wWr8fL8ffx/vjRLDD/WHxrEnJ3AXoaykvxxfhw/Fe8GL80afdCPBp3xPfi0fjteDx+a18fKSz/9fjPA0/Z8Np0QeovBfhpDK/HzfuC/y50T9elMb8aP7vv5/3+zu38aPkV6NPw/PzsmZ2/FHHrrPYnDdDT89L/zPt8/NCXVjbvb4YRESBAgAABAgQIECBAgAABAgQIECBAgAABAgQIEKhWYBigX52trj1sytOgdn5dFyI27U9H0/7pgZW57/nxhw6sEl8U9vZXraeVu4s+xwXo06D58iz07ProrwL+8XtenQTY6dM/S33R9vDDIHvRuFM/x219P/35w5NxvXPjm3v3f222Yj/10R97/5p07nzTvnDgTPqhzwnGnwL0RcF2t1r74XhuEnwPg/Dulv1Qehhop2uGK8n7ofxw1flwGovOVE/t0ycF9v1/d23TONNK+S7AT9e8HL8YaR4PxIXJavoU7Dc7sVyAftjLJMM65wTowxcrnv7EW9X+lTExAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAoUInDxA72/1/r8/+aW9MPjK3pbm0+3fp6t3v79vW/RuS+sEsygsX2Y17nEB+vTnsS+YTv/vB6Jv3/SNAwH2UdvX9/scvjzQFXkYuC7eRn66Tfc8wD8+QG/aX4iIn4m+3aIH62Tjf6kL0BcF5t1K77TavL/yO/2/+/QD6/Td7fHpyTbvKXRPn2GA3gXx6WfdqvSjfj/6IXl/jN2q+W6b+H4ft8abswC9a5O2eH8krk62fU+fpQP0/gsPaReB/XU++PJI/0WMo7Zw769AX2bHhUL+iBgmAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAgVoE5gH6MgF2N+suVG6bz0bTXom2uTe2di9MzoP+if/7s3j3hqdnq9EXreatOUCfn/n+H7MV7otXwJ8kQP/nAy8F9J/A6wzQUxdHre5eVYDeDbV/DvpRQXr/vlfjVydBftqePX3SGekpqO9C8UW/iF2An4L2jQzQlz0uoZa/MuZBgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAoBCBeYCeBjw89/mwSXQrdNvm8xHxa73zwR+LtvmbiPijePum+yJtS73OAP3oLdwP30J9uFV7N+/h2eSHBZ/9+6YXCYbbyPdXG59kBXrEa7G1u723Bf7hIfoJx9+tQE/T7MLqq/FkXI4/iMfiK5Ptzruf9bdG71j6W7IPzxxP1wxXoPcfo6N+1l3XrSD/2/jXuBIf3ReYL7MdfNpiPs3r3vhmXIqPz1amn3AF+jOzs867gQ1XjS963o5bgX5YrQr5g2GYBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBGoW2B+gz1cyf+RAeDhddf61SOeTT4Plr+5tL/7A5Luu7dbuLbG79e3Ziul1BujDwDtVbriy/rAAc/pSwAsR8cBk6/n0mb5QcCnaZrv3ksBLEXFtds76fH7TgHt4Tvb83PQ48RbuKUCf95nOQZ+OY9HnBOPvB+j9QPu1uGWy0rs7p7zbev2u+O7s++G56IvOLB+G5H8XvxN/Et+MtA38MgF6ml4Xgqd/X4l/mLRNn+7+/ZXlaQxfiY/E5+OrB85t7wfu79t5p1n4QsfQc9H55MM6pu3Y5999bvLM9Lfub5s7J78Xi85NH75gUfNfGHMjQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgUJDA/gC9G/g8jJ1PpQsE59ekcPn8LEhO309X5D4S/WvXGaCnMSw6f7w/nqNWAA/nndpF/O5kyim4ngemD0fEgxFx6x7HPHRPX3TBe/p32zw/yYCbdvu6A/Rpn9OAP/XXP3O7/7AtOf5+gJ6ap7D6gbiwb7vz9H131vkX4l/iofj9uBbvm9ytv/36MgF6d03X/lJ8PR6PZ4/8NenafCy+deDaYX9dwN+thu+36fezvfPs9Hmf12d6Ln3/bPJuVAefo1eibR6Mpn0kmvbCrE33zE/bXYu2eSia9guzc+v7Afru1rm9lzQOzn34+1XQHxFDJUCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCLwOIAvZTZTQPtq/sCzVLGvo5xHvKyQHsx2v7tlznrvNvWfR3DHuseky3ccz6etxw9bQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhsvEBeoHja0+vOYt/dOh9P3ffGaQ9n4+4/3L5+b4DDAD1tc54+w1Xh3Qr0l+KLs3PRN26OJxiQAP0EWC4lQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgcAYFyg3Qj9qK/QwWcrLFe9puvjsjfb4F+Qf3bbOfdpXvrUBPW5xfiItxNXYOhOQC9MGDZAX6WfzNMmcCBAgQIECAAAECBAgQIECAAAECBAgQIECAAIEzJFBegD5fVX3bkeeBn6Eizqa6/zzu6fnrC85LTwH6G3FznI/PxCtxbt+Z5n02AboA/Sz+GpkzAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIDA2RUoL0A/u7Va2cyHW7ivrOMN7yh7C/cNn5/hESBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECCQJyBAz/MrsrUAvciyGTQBAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkeOso3259c4jaXu1UTz8hrH5FYECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBDIFhCgZxOutoM22r+KiM+utte19/bHTTRfXvtd3ZAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIZAgL0DLyxmhYeogvPx3ow9EuAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAwKgCAvRRea+/80JDdOH59ZdcSwIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIETllAgH7KBTjq9oWF6MLzDX6WDI0AAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAgeMFBOjHG53qFYWE6MLzU31K3JwAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAgVUICNBXoThyHxseogvPR66/7gkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQWI+AAH09ztl32dAQXXieXVkdECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECCwKQIC9E2pxBLj2LAQXXi+RM1cQoAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIBAOQIC9HJqNRnphoTowvPCnhvDJUCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEDgeAEB+vFGG3fFKYfowvONeyIMiAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgACBVQgI0FeheAp9nFKILjw/hVq7JQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEC6xEQoK/HeZS7rDlEF56PUkWdEiBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECCwKQIC9E2pxHWOY00huvD8OuujGQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEC5QgI0Mup1aEjHTlEF55X8IyYAgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECxwsI0I83KuKKkUJ04XkR1TdIAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgRWISBAX4XihvSx4hBdeL4hdTUMAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgTWIyBAX4/z2u6yohBdeL62irkRAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQKbIiBA35RKrHAcmSG68HyFtdAVAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQLlCAjQy6nViUZ6nSG68PxEyi4mQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQKAmAQF6TdUczOWEIbrwvOJnwdQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIEDheQIB+vFHRVywZogvPi66ywRMgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgsAoBAfoqFDe8j2NCdOH5htfP8AgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQWI+AAH09zqd+l0NCdOH5qVfGAAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQ2BQBAfqmVGIN4xiE6MLzNZi7BQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEC5QgI0Mup1UpGuhei/7CJ5ssr6VAnBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAib2gA8AAAI0UlEQVQQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoR+H9KYytBPX057AAAAABJRU5ErkJggg==";
-    v9ng.cache.canvas_webgl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAB9AAAADICAYAAACwGnoBAAAAAXNSR0IArs4c6QAAIABJREFUeF7t3VGIbddZB/BvT4TEtkSJkd4HKVKLBBT7IhWs6EUCiXkSLblgY8XY3N4rmKSUIAhitSKUIk3ykEwm6aWapHKDlvoSEggSS/viQ2mhpXmIhQYfErgIlqQmYGbLOmf2OXv2nJk5c9fZZ85a8ztP957Za+21ft+eefnvtVYTPgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgEA0DM6eQHsx2rM364hmx/N+FutuzgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgSWFRCgLytV0XUC9IqKaSoECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECKxMoLwA/b6dx6NpL0XEK/Fu89dxQ/tP0TZ3xpMXX1yZSr+jdL/0efLi5fjU9oejbV6KtrlntPule/3hP743bnr7uYh4bXLfVX32xv9CPHrrHfG9lfT6nfi5uD0+Hc/ElVhVnysZ2IJOTmUF+sUn7o+Iv4ymvT2euPSdseamXwIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIE8gUWB+iffPL9sbX7ckTcNrvFmCH1svOYhpGXY3frfDx13xtx384d0bQvCNCXBBSgr/+FEQH6kg+nywgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAicvsDBQHEa+D1yIJSersT+2qgrr4/zmI7hA/H2TXfH059467jLV/JzK9CPZCxuBfr0pYtnrAhfyW+HTggQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUJbA/QN/0cFGAnvfwWYHe7O1aIEDPe5K0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFClwDxA787dbtoXY+dTjy6c7aKzubvt3tvm5dl53fPvHoyt3df3zg1/KJr2z2fbwqct4dvm24Ot4h9YeO/FW8pvx9bu9oEzyefzuKs3h3m//TmkC6bnqU9/3p1xHnHrpG3bbM/62H8GempzbzTt9B5t8/y+VfEHx/vKbNv5/v2b9vuT1f7Tz+JrujPQ52e/LzZKPSw5/nQG+rn4n4Vnl6cV5RfiYlyNnXg9firuiXsn55s/GHfHK3FuMtBL8fV4PJ6d/Ltbgb4dz8aV+Gg8H7984Jr0xeX4eGzHb05+dld8N56LnXhvvLPvMXsrboy742J8IP571n+64I24Oc7HZ+Jy/HvcH/82+383nq6/N+PGyXUfjGuz/ru26bvn41eeitj9ZO+m145ciT43n9anbR6Mpn0kmvbC5DzztFtD29yxr/ZdDdrmnsluDf2XUt694fUDRyNMB3P0OKr802NSBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBDZPYB6gD4O/w8Y6DA3noe21WUg8/e6x2N36vbjh3XOTkDuFhN3Z5d028f3gcJmzoocr0IdjPjrMnwb8/YC9f677fB6fm4X48+3stydt59ek4P32SYg6v+cPZkHqxSf+Ina3vjQ5p30emMfk5+lz09vP7YXv0zB8OO7hiwqHbavfr9EJxp8C9N+IVxeG1Snofi1umQTQ34gPxZ1xf9wWr8fL8ffx/vjRLDD/WHxrEnJ3AXoaykvxxfhw/Fe8GL80afdCPBp3xPfi0fjteDx+a18fKSz/9fjPA0/Z8Np0QeovBfhpDK/HzfuC/y50T9elMb8aP7vv5/3+zu38aPkV6NPw/PzsmZ2/FHHrrPYnDdDT89L/zPt8/NCXVjbvb4YRESBAgAABAgQIECBAgAABAgQIECBAgAABAgQIEKhWYBigX52trj1sytOgdn5dFyI27U9H0/7pgZW57/nxhw6sEl8U9vZXraeVu4s+xwXo06D58iz07ProrwL+8XtenQTY6dM/S33R9vDDIHvRuFM/x219P/35w5NxvXPjm3v3f222Yj/10R97/5p07nzTvnDgTPqhzwnGnwL0RcF2t1r74XhuEnwPg/Dulv1Qehhop2uGK8n7ofxw1flwGovOVE/t0ycF9v1/d23TONNK+S7AT9e8HL8YaR4PxIXJavoU7Dc7sVyAftjLJMM65wTowxcrnv7EW9X+lTExAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAoUInDxA72/1/r8/+aW9MPjK3pbm0+3fp6t3v79vW/RuS+sEsygsX2Y17nEB+vTnsS+YTv/vB6Jv3/SNAwH2UdvX9/scvjzQFXkYuC7eRn66Tfc8wD8+QG/aX4iIn4m+3aIH62Tjf6kL0BcF5t1K77TavL/yO/2/+/QD6/Td7fHpyTbvKXRPn2GA3gXx6WfdqvSjfj/6IXl/jN2q+W6b+H4ft8abswC9a5O2eH8krk62fU+fpQP0/gsPaReB/XU++PJI/0WMo7Zw769AX2bHhUL+iBgmAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAgVoE5gH6MgF2N+suVG6bz0bTXom2uTe2di9MzoP+if/7s3j3hqdnq9EXreatOUCfn/n+H7MV7otXwJ8kQP/nAy8F9J/A6wzQUxdHre5eVYDeDbV/DvpRQXr/vlfjVydBftqePX3SGekpqO9C8UW/iF2An4L2jQzQlz0uoZa/MuZBgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAoBCBeYCeBjw89/mwSXQrdNvm8xHxa73zwR+LtvmbiPijePum+yJtS73OAP3oLdwP30J9uFV7N+/h2eSHBZ/9+6YXCYbbyPdXG59kBXrEa7G1u723Bf7hIfoJx9+tQE/T7MLqq/FkXI4/iMfiK5Ptzruf9bdG71j6W7IPzxxP1wxXoPcfo6N+1l3XrSD/2/jXuBIf3ReYL7MdfNpiPs3r3vhmXIqPz1amn3AF+jOzs867gQ1XjS963o5bgX5YrQr5g2GYBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBGoW2B+gz1cyf+RAeDhddf61SOeTT4Plr+5tL/7A5Luu7dbuLbG79e3Ziul1BujDwDtVbriy/rAAc/pSwAsR8cBk6/n0mb5QcCnaZrv3ksBLEXFtds76fH7TgHt4Tvb83PQ48RbuKUCf95nOQZ+OY9HnBOPvB+j9QPu1uGWy0rs7p7zbev2u+O7s++G56IvOLB+G5H8XvxN/Et+MtA38MgF6ml4Xgqd/X4l/mLRNn+7+/ZXlaQxfiY/E5+OrB85t7wfu79t5p1n4QsfQc9H55MM6pu3Y5999bvLM9Lfub5s7J78Xi85NH75gUfNfGHMjQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgUJDA/gC9G/g8jJ1PpQsE59ekcPn8LEhO309X5D4S/WvXGaCnMSw6f7w/nqNWAA/nndpF/O5kyim4ngemD0fEgxFx6x7HPHRPX3TBe/p32zw/yYCbdvu6A/Rpn9OAP/XXP3O7/7AtOf5+gJ6ap7D6gbiwb7vz9H131vkX4l/iofj9uBbvm9ytv/36MgF6d03X/lJ8PR6PZ4/8NenafCy+deDaYX9dwN+thu+36fezvfPs9Hmf12d6Ln3/bPJuVAefo1eibR6Mpn0kmvbCrE33zE/bXYu2eSia9guzc+v7Afru1rm9lzQOzn34+1XQHxFDJUCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCLwOIAvZTZTQPtq/sCzVLGvo5xHvKyQHsx2v7tlznrvNvWfR3DHuseky3ccz6etxw9bQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhsvEBeoHja0+vOYt/dOh9P3ffGaQ9n4+4/3L5+b4DDAD1tc54+w1Xh3Qr0l+KLs3PRN26OJxiQAP0EWC4lQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgcAYFyg3Qj9qK/QwWcrLFe9puvjsjfb4F+Qf3bbOfdpXvrUBPW5xfiItxNXYOhOQC9MGDZAX6WfzNMmcCBAgQIECAAAECBAgQIECAAAECBAgQIECAAIEzJFBegD5fVX3bkeeBn6Eizqa6/zzu6fnrC85LTwH6G3FznI/PxCtxbt+Z5n02AboA/Sz+GpkzAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIDA2RUoL0A/u7Va2cyHW7ivrOMN7yh7C/cNn5/hESBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECCQJyBAz/MrsrUAvciyGTQBAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkZJgAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAiMLCNBHBtY9AQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECJQhIEAvo05GSYAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIjCwjQRwbWPQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAiUISBAL6NORkmAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECIwsI0EcG1j0BAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIlCEgQC+jTkeOso3259c4jaXu1UTz8hrH5FYECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBDIFhCgZxOutoM22r+KiM+utte19/bHTTRfXvtd3ZAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIZAgL0DLyxmhYeogvPx3ow9EuAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAwKgCAvRRea+/80JDdOH59ZdcSwIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIETllAgH7KBTjq9oWF6MLzDX6WDI0AAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAgeMFBOjHG53qFYWE6MLzU31K3JwAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAgVUICNBXoThyHxseogvPR66/7gkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQWI+AAH09ztl32dAQXXieXVkdECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECCwKQIC9E2pxBLj2LAQXXi+RM1cQoAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIBAOQIC9HJqNRnphoTowvPCnhvDJUCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEDgeAEB+vFGG3fFKYfowvONeyIMiAABAgQIECBAgAABAgQIECBAgAABAgQIECBAgACBVQgI0FeheAp9nFKILjw/hVq7JQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEC6xEQoK/HeZS7rDlEF56PUkWdEiBAgAABAgQIECBAgAABAgQIECBAgAABAgQIECCwKQIC9E2pxHWOY00huvD8OuujGQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEC5QgI0Mup1aEjHTlEF55X8IyYAgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECxwsI0I83KuKKkUJ04XkR1TdIAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgRWISBAX4XihvSx4hBdeL4hdTUMAgQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgTWIyBAX4/z2u6yohBdeL62irkRAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQKbIiBA35RKrHAcmSG68HyFtdAVAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQLlCAjQy6nViUZ6nSG68PxEyi4mQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQKAmAQF6TdUczOWEIbrwvOJnwdQIECBAgAABAgQIECBAgAABAgQIECBAgAABAgQIEDheQIB+vFHRVywZogvPi66ywRMgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgsAoBAfoqFDe8j2NCdOH5htfP8AgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQWI+AAH09zqd+l0NCdOH5qVfGAAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQ2BQBAfqmVGIN4xiE6MLzNZi7BQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEC5QgI0Mup1UpGuhei/7CJ5ssr6VAnBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAib2gA8AAAI0UlEQVQQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoREKBXUkjTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIE8AQF6np/WBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIFCJgAC9kkKaBgECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAjkCQjQ8/y0JkCAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAIFKBATolRTSNAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIEAgT0CAnuenNQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAhUIiBAr6SQpkGAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECeQIC9Dw/rQkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECgEgEBeiWFNA0CBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQyBMQoOf5aU2AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAEClQgI0CsppGkQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQJ6AAD3PT2sCBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQqERAgF5JIU2DAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBPIEBOh5floTIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAQCUCAvRKCmkaBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIJAnIEDP89OaAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBCoR+H9KYytBPX057AAAAABJRU5ErkJggg==";
-    v9ng.cache.mouseEvents = [{ "clientX": 145, "clientY": 0, "timeStamp": 119.60000002384186, "type": "mousemove" }, { "clientX": 145, "clientY": 0, "timeStamp": 119.60000002384186, "type": "mousemove" }, { "clientX": 147, "clientY": 0, "timeStamp": 120.40000000596046, "type": "mousemove" }, { "clientX": 150, "clientY": 1, "timeStamp": 121.40000000596046, "type": "mousemove" }, { "clientX": 152, "clientY": 2, "timeStamp": 122.5, "type": "mousemove" }, { "clientX": 154, "clientY": 3, "timeStamp": 123.5, "type": "mousemove" }, { "clientX": 156, "clientY": 4, "timeStamp": 124.5, "type": "mousemove" }, { "clientX": 158, "clientY": 5, "timeStamp": 125.40000000596046, "type": "mousemove" }, { "clientX": 161, "clientY": 5, "timeStamp": 126.30000001192093, "type": "mousemove" }, { "clientX": 163, "clientY": 6, "timeStamp": 127.40000000596046, "type": "mousemove" }, { "clientX": 166, "clientY": 7, "timeStamp": 128.5, "type": "mousemove" }, { "clientX": 168, "clientY": 8, "timeStamp": 129.5, "type": "mousemove" }, { "clientX": 170, "clientY": 9, "timeStamp": 130.40000000596046, "type": "mousemove" }, { "clientX": 173, "clientY": 10, "timeStamp": 131.5, "type": "mousemove" }, { "clientX": 176, "clientY": 11, "timeStamp": 132.5, "type": "mousemove" }, { "clientX": 179, "clientY": 11, "timeStamp": 133.40000000596046, "type": "mousemove" }, { "clientX": 181, "clientY": 13, "timeStamp": 134.40000000596046, "type": "mousemove" }, { "clientX": 184, "clientY": 14, "timeStamp": 135.40000000596046, "type": "mousemove" }, { "clientX": 186, "clientY": 14, "timeStamp": 136.40000000596046, "type": "mousemove" }, { "clientX": 189, "clientY": 15, "timeStamp": 137.7000000178814, "type": "mousemove" }, { "clientX": 191, "clientY": 16, "timeStamp": 138.5, "type": "mousemove" }, { "clientX": 195, "clientY": 18, "timeStamp": 139.40000000596046, "type": "mousemove" }, { "clientX": 197, "clientY": 18, "timeStamp": 140.5, "type": "mousemove" }, { "clientX": 199, "clientY": 19, "timeStamp": 141.5, "type": "mousemove" }, { "clientX": 202, "clientY": 20, "timeStamp": 142.40000000596046, "type": "mousemove" }, { "clientX": 204, "clientY": 21, "timeStamp": 143.40000000596046, "type": "mousemove" }, { "clientX": 207, "clientY": 22, "timeStamp": 144.5, "type": "mousemove" }, { "clientX": 211, "clientY": 23, "timeStamp": 145.40000000596046, "type": "mousemove" }, { "clientX": 213, "clientY": 24, "timeStamp": 146.5, "type": "mousemove" }, { "clientX": 217, "clientY": 25, "timeStamp": 147.40000000596046, "type": "mousemove" }, { "clientX": 219, "clientY": 26, "timeStamp": 148.40000000596046, "type": "mousemove" }, { "clientX": 221, "clientY": 27, "timeStamp": 149.40000000596046, "type": "mousemove" }, { "clientX": 224, "clientY": 28, "timeStamp": 150.40000000596046, "type": "mousemove" }, { "clientX": 227, "clientY": 29, "timeStamp": 151.40000000596046, "type": "mousemove" }, { "clientX": 230, "clientY": 30, "timeStamp": 152.5, "type": "mousemove" }, { "clientX": 232, "clientY": 31, "timeStamp": 153.40000000596046, "type": "mousemove" }, { "clientX": 235, "clientY": 32, "timeStamp": 154.5, "type": "mousemove" }, { "clientX": 238, "clientY": 33, "timeStamp": 155.5, "type": "mousemove" }, { "clientX": 240, "clientY": 34, "timeStamp": 156.5, "type": "mousemove" }, { "clientX": 243, "clientY": 35, "timeStamp": 158.5, "type": "mousemove" }, { "clientX": 246, "clientY": 36, "timeStamp": 159.40000000596046, "type": "mousemove" }, { "clientX": 248, "clientY": 36, "timeStamp": 160.5, "type": "mousemove" }, { "clientX": 252, "clientY": 37, "timeStamp": 161.5, "type": "mousemove" }, { "clientX": 254, "clientY": 39, "timeStamp": 162.5, "type": "mousemove" }, { "clientX": 256, "clientY": 39, "timeStamp": 163.5, "type": "mousemove" }, { "clientX": 259, "clientY": 40, "timeStamp": 164.40000000596046, "type": "mousemove" }, { "clientX": 262, "clientY": 42, "timeStamp": 165.40000000596046, "type": "mousemove" }, { "clientX": 265, "clientY": 42, "timeStamp": 166.40000000596046, "type": "mousemove" }, { "clientX": 267, "clientY": 43, "timeStamp": 167.5, "type": "mousemove" }, { "clientX": 270, "clientY": 44, "timeStamp": 168.5, "type": "mousemove" }, { "clientX": 272, "clientY": 45, "timeStamp": 169.5, "type": "mousemove" }, { "clientX": 274, "clientY": 46, "timeStamp": 170.90000000596046, "type": "mousemove" }, { "clientX": 277, "clientY": 47, "timeStamp": 171.5, "type": "mousemove" }, { "clientX": 280, "clientY": 48, "timeStamp": 172.40000000596046, "type": "mousemove" }, { "clientX": 282, "clientY": 48, "timeStamp": 173.5, "type": "mousemove" }, { "clientX": 285, "clientY": 50, "timeStamp": 174.40000000596046, "type": "mousemove" }, { "clientX": 287, "clientY": 51, "timeStamp": 175.40000000596046, "type": "mousemove" }, { "clientX": 290, "clientY": 52, "timeStamp": 176.40000000596046, "type": "mousemove" }, { "clientX": 293, "clientY": 53, "timeStamp": 177.5, "type": "mousemove" }, { "clientX": 295, "clientY": 54, "timeStamp": 178.5, "type": "mousemove" }, { "clientX": 298, "clientY": 55, "timeStamp": 179.5, "type": "mousemove" }, { "clientX": 300, "clientY": 56, "timeStamp": 180.40000000596046, "type": "mousemove" }, { "clientX": 302, "clientY": 56, "timeStamp": 181.5, "type": "mousemove" }, { "clientX": 305, "clientY": 58, "timeStamp": 182.5, "type": "mousemove" }, { "clientX": 308, "clientY": 58, "timeStamp": 183.5, "type": "mousemove" }, { "clientX": 310, "clientY": 59, "timeStamp": 184.5, "type": "mousemove" }, { "clientX": 312, "clientY": 60, "timeStamp": 185.5, "type": "mousemove" }, { "clientX": 315, "clientY": 61, "timeStamp": 186.5, "type": "mousemove" }, { "clientX": 317, "clientY": 61, "timeStamp": 187.5, "type": "mousemove" }, { "clientX": 320, "clientY": 63, "timeStamp": 188.40000000596046, "type": "mousemove" }, { "clientX": 322, "clientY": 64, "timeStamp": 189.5, "type": "mousemove" }, { "clientX": 324, "clientY": 64, "timeStamp": 190.5, "type": "mousemove" }, { "clientX": 326, "clientY": 65, "timeStamp": 191.5, "type": "mousemove" }, { "clientX": 328, "clientY": 67, "timeStamp": 192.5, "type": "mousemove" }, { "clientX": 331, "clientY": 67, "timeStamp": 193.5, "type": "mousemove" }, { "clientX": 333, "clientY": 68, "timeStamp": 194.40000000596046, "type": "mousemove" }, { "clientX": 335, "clientY": 69, "timeStamp": 195.5, "type": "mousemove" }, { "clientX": 337, "clientY": 69, "timeStamp": 196.40000000596046, "type": "mousemove" }, { "clientX": 339, "clientY": 70, "timeStamp": 197.5, "type": "mousemove" }, { "clientX": 341, "clientY": 71, "timeStamp": 198.40000000596046, "type": "mousemove" }, { "clientX": 343, "clientY": 72, "timeStamp": 199.5, "type": "mousemove" }, { "clientX": 344, "clientY": 72, "timeStamp": 200.5, "type": "mousemove" }, { "clientX": 348, "clientY": 74, "timeStamp": 201.5, "type": "mousemove" }, { "clientX": 349, "clientY": 75, "timeStamp": 202.40000000596046, "type": "mousemove" }, { "clientX": 351, "clientY": 75, "timeStamp": 203.40000000596046, "type": "mousemove" }, { "clientX": 352, "clientY": 76, "timeStamp": 204.30000001192093, "type": "mousemove" }, { "clientX": 355, "clientY": 77, "timeStamp": 205.40000000596046, "type": "mousemove" }, { "clientX": 356, "clientY": 77, "timeStamp": 206.40000000596046, "type": "mousemove" }, { "clientX": 357, "clientY": 78, "timeStamp": 207.5, "type": "mousemove" }, { "clientX": 360, "clientY": 79, "timeStamp": 208.40000000596046, "type": "mousemove" }, { "clientX": 361, "clientY": 80, "timeStamp": 209.5, "type": "mousemove" }, { "clientX": 362, "clientY": 80, "timeStamp": 210.40000000596046, "type": "mousemove" }, { "clientX": 364, "clientY": 81, "timeStamp": 211.5, "type": "mousemove" }, { "clientX": 365, "clientY": 82, "timeStamp": 212.5, "type": "mousemove" }, { "clientX": 367, "clientY": 82, "timeStamp": 213.5, "type": "mousemove" }, { "clientX": 368, "clientY": 83, "timeStamp": 214.5, "type": "mousemove" }, { "clientX": 370, "clientY": 84, "timeStamp": 215.40000000596046, "type": "mousemove" }, { "clientX": 372, "clientY": 84, "timeStamp": 217.5, "type": "mousemove" }, { "clientX": 373, "clientY": 85, "timeStamp": 218.5, "type": "mousemove" }, { "clientX": 374, "clientY": 85, "timeStamp": 219.40000000596046, "type": "mousemove" }, { "clientX": 375, "clientY": 86, "timeStamp": 220.60000002384186, "type": "mousemove" }, { "clientX": 376, "clientY": 87, "timeStamp": 221.40000000596046, "type": "mousemove" }, { "clientX": 377, "clientY": 87, "timeStamp": 222.40000000596046, "type": "mousemove" }, { "clientX": 379, "clientY": 87, "timeStamp": 223.5, "type": "mousemove" }, { "clientX": 379, "clientY": 88, "timeStamp": 224.5, "type": "mousemove" }, { "clientX": 380, "clientY": 89, "timeStamp": 225.5, "type": "mousemove" }, { "clientX": 382, "clientY": 89, "timeStamp": 226.40000000596046, "type": "mousemove" }, { "clientX": 384, "clientY": 90, "timeStamp": 228.5, "type": "mousemove" }, { "clientX": 385, "clientY": 90, "timeStamp": 230.60000002384186, "type": "mousemove" }, { "clientX": 386, "clientY": 91, "timeStamp": 231.40000000596046, "type": "mousemove" }, { "clientX": 387, "clientY": 92, "timeStamp": 232.5, "type": "mousemove" }, { "clientX": 388, "clientY": 92, "timeStamp": 234.60000002384186, "type": "mousemove" }, { "clientX": 390, "clientY": 93, "timeStamp": 235.5, "type": "mousemove" }, { "clientX": 391, "clientY": 93, "timeStamp": 237.5, "type": "mousemove" }, { "clientX": 391, "clientY": 94, "timeStamp": 238.90000000596046, "type": "mousemove" }, { "clientX": 393, "clientY": 95, "timeStamp": 239.5, "type": "mousemove" }, { "clientX": 395, "clientY": 95, "timeStamp": 241.60000002384186, "type": "mousemove" }, { "clientX": 395, "clientY": 96, "timeStamp": 242.5, "type": "mousemove" }, { "clientX": 396, "clientY": 96, "timeStamp": 243.5, "type": "mousemove" }, { "clientX": 397, "clientY": 96, "timeStamp": 244.5, "type": "mousemove" }, { "clientX": 397, "clientY": 97, "timeStamp": 245.5, "type": "mousemove" }, { "clientX": 398, "clientY": 97, "timeStamp": 246.5, "type": "mousemove" }, { "clientX": 399, "clientY": 98, "timeStamp": 247.60000002384186, "type": "mousemove" }, { "clientX": 400, "clientY": 98, "timeStamp": 248.60000002384186, "type": "mousemove" }, { "clientX": 401, "clientY": 99, "timeStamp": 250.5, "type": "mousemove" }, { "clientX": 402, "clientY": 99, "timeStamp": 251.5, "type": "mousemove" }, { "clientX": 403, "clientY": 100, "timeStamp": 253.40000000596046, "type": "mousemove" }, { "clientX": 404, "clientY": 100, "timeStamp": 254.40000000596046, "type": "mousemove" }, { "clientX": 405, "clientY": 101, "timeStamp": 255.5, "type": "mousemove" }, { "clientX": 406, "clientY": 101, "timeStamp": 256.7000000178814, "type": "mousemove" }, { "clientX": 406, "clientY": 102, "timeStamp": 257.5, "type": "mousemove" }, { "clientX": 407, "clientY": 102, "timeStamp": 258.40000000596046, "type": "mousemove" }, { "clientX": 408, "clientY": 102, "timeStamp": 259.5, "type": "mousemove" }, { "clientX": 409, "clientY": 103, "timeStamp": 260.5, "type": "mousemove" }, { "clientX": 410, "clientY": 104, "timeStamp": 261.40000000596046, "type": "mousemove" }, { "clientX": 411, "clientY": 104, "timeStamp": 263.40000000596046, "type": "mousemove" }, { "clientX": 412, "clientY": 105, "timeStamp": 264.5, "type": "mousemove" }, { "clientX": 413, "clientY": 105, "timeStamp": 265.5, "type": "mousemove" }, { "clientX": 414, "clientY": 106, "timeStamp": 267.5, "type": "mousemove" }, { "clientX": 416, "clientY": 107, "timeStamp": 268.5, "type": "mousemove" }, { "clientX": 418, "clientY": 107, "timeStamp": 270.5, "type": "mousemove" }, { "clientX": 418, "clientY": 108, "timeStamp": 271.30000001192093, "type": "mousemove" }, { "clientX": 419, "clientY": 109, "timeStamp": 272.7000000178814, "type": "mousemove" }, { "clientX": 420, "clientY": 109, "timeStamp": 273.40000000596046, "type": "mousemove" }, { "clientX": 421, "clientY": 109, "timeStamp": 274.5, "type": "mousemove" }, { "clientX": 421, "clientY": 110, "timeStamp": 275.40000000596046, "type": "mousemove" }, { "clientX": 423, "clientY": 110, "timeStamp": 276.5, "type": "mousemove" }, { "clientX": 424, "clientY": 111, "timeStamp": 278.60000002384186, "type": "mousemove" }, { "clientX": 425, "clientY": 112, "timeStamp": 279.60000002384186, "type": "mousemove" }, { "clientX": 426, "clientY": 112, "timeStamp": 280.5, "type": "mousemove" }, { "clientX": 427, "clientY": 112, "timeStamp": 281.5, "type": "mousemove" }, { "clientX": 428, "clientY": 113, "timeStamp": 282.40000000596046, "type": "mousemove" }, { "clientX": 429, "clientY": 113, "timeStamp": 283.40000000596046, "type": "mousemove" }, { "clientX": 430, "clientY": 114, "timeStamp": 284.5, "type": "mousemove" }, { "clientX": 431, "clientY": 114, "timeStamp": 285.5, "type": "mousemove" }, { "clientX": 431, "clientY": 115, "timeStamp": 286.5, "type": "mousemove" }, { "clientX": 432, "clientY": 115, "timeStamp": 287.30000001192093, "type": "mousemove" }, { "clientX": 433, "clientY": 115, "timeStamp": 288.5, "type": "mousemove" }, { "clientX": 434, "clientY": 116, "timeStamp": 289.5, "type": "mousemove" }, { "clientX": 435, "clientY": 116, "timeStamp": 290.40000000596046, "type": "mousemove" }, { "clientX": 435, "clientY": 117, "timeStamp": 291.5, "type": "mousemove" }, { "clientX": 437, "clientY": 117, "timeStamp": 292.40000000596046, "type": "mousemove" }, { "clientX": 438, "clientY": 118, "timeStamp": 294.40000000596046, "type": "mousemove" }, { "clientX": 439, "clientY": 118, "timeStamp": 295.5, "type": "mousemove" }, { "clientX": 440, "clientY": 118, "timeStamp": 296.40000000596046, "type": "mousemove" }, { "clientX": 440, "clientY": 119, "timeStamp": 297.40000000596046, "type": "mousemove" }, { "clientX": 441, "clientY": 119, "timeStamp": 298.5, "type": "mousemove" }, { "clientX": 442, "clientY": 119, "timeStamp": 299.5, "type": "mousemove" }, { "clientX": 443, "clientY": 119, "timeStamp": 300.5, "type": "mousemove" }, { "clientX": 443, "clientY": 120, "timeStamp": 301.40000000596046, "type": "mousemove" }, { "clientX": 444, "clientY": 121, "timeStamp": 302.40000000596046, "type": "mousemove" }, { "clientX": 445, "clientY": 121, "timeStamp": 304.30000001192093, "type": "mousemove" }, { "clientX": 446, "clientY": 121, "timeStamp": 305.40000000596046, "type": "mousemove" }, { "clientX": 447, "clientY": 122, "timeStamp": 307.5, "type": "mousemove" }, { "clientX": 448, "clientY": 122, "timeStamp": 309.60000002384186, "type": "mousemove" }, { "clientX": 449, "clientY": 122, "timeStamp": 311.60000002384186, "type": "mousemove" }, { "clientX": 449, "clientY": 123, "timeStamp": 312.60000002384186, "type": "mousemove" }, { "clientX": 450, "clientY": 123, "timeStamp": 314.60000002384186, "type": "mousemove" }, { "clientX": 451, "clientY": 124, "timeStamp": 315.5, "type": "mousemove" }, { "clientX": 452, "clientY": 124, "timeStamp": 318.30000001192093, "type": "mousemove" }, { "clientX": 453, "clientY": 124, "timeStamp": 321.80000001192093, "type": "mousemove" }, { "clientX": 453, "clientY": 125, "timeStamp": 325.40000000596046, "type": "mousemove" }, { "clientX": 454, "clientY": 125, "timeStamp": 326.40000000596046, "type": "mousemove" }, { "clientX": 455, "clientY": 125, "timeStamp": 330.40000000596046, "type": "mousemove" }, { "clientX": 455, "clientY": 126, "timeStamp": 335.5, "type": "mousemove" }, { "clientX": 456, "clientY": 126, "timeStamp": 338.40000000596046, "type": "mousemove" }, { "clientX": 455, "clientY": 126, "timeStamp": 387.40000000596046, "type": "mousemove" }, { "clientX": 454, "clientY": 126, "timeStamp": 393.60000002384186, "type": "mousemove" }, { "clientX": 453, "clientY": 126, "timeStamp": 397.30000001192093, "type": "mousemove" }, { "clientX": 452, "clientY": 126, "timeStamp": 400.7000000178814, "type": "mousemove" }, { "clientX": 451, "clientY": 126, "timeStamp": 402.7000000178814, "type": "mousemove" }, { "clientX": 450, "clientY": 125, "timeStamp": 404.40000000596046, "type": "mousemove" }, { "clientX": 449, "clientY": 125, "timeStamp": 408.7000000178814, "type": "mousemove" }, { "clientX": 449, "clientY": 124, "timeStamp": 409.60000002384186, "type": "mousemove" }, { "clientX": 448, "clientY": 124, "timeStamp": 410.5, "type": "mousemove" }, { "clientX": 448, "clientY": 123, "timeStamp": 411.40000000596046, "type": "mousemove" }, { "clientX": 447, "clientY": 123, "timeStamp": 412.40000000596046, "type": "mousemove" }, { "clientX": 446, "clientY": 123, "timeStamp": 413.5, "type": "mousemove" }, { "clientX": 445, "clientY": 122, "timeStamp": 415.7000000178814, "type": "mousemove" }, { "clientX": 444, "clientY": 122, "timeStamp": 416.40000000596046, "type": "mousemove" }, { "clientX": 443, "clientY": 121, "timeStamp": 417.5, "type": "mousemove" }, { "clientX": 442, "clientY": 121, "timeStamp": 418.60000002384186, "type": "mousemove" }, { "clientX": 441, "clientY": 121, "timeStamp": 419.5, "type": "mousemove" }, { "clientX": 441, "clientY": 120, "timeStamp": 420.5, "type": "mousemove" }, { "clientX": 440, "clientY": 120, "timeStamp": 421.7000000178814, "type": "mousemove" }, { "clientX": 439, "clientY": 120, "timeStamp": 422.40000000596046, "type": "mousemove" }, { "clientX": 438, "clientY": 119, "timeStamp": 423.5, "type": "mousemove" }, { "clientX": 437, "clientY": 118, "timeStamp": 424.5, "type": "mousemove" }, { "clientX": 436, "clientY": 118, "timeStamp": 425.5, "type": "mousemove" }, { "clientX": 435, "clientY": 118, "timeStamp": 426.40000000596046, "type": "mousemove" }, { "clientX": 434, "clientY": 117, "timeStamp": 427.60000002384186, "type": "mousemove" }, { "clientX": 433, "clientY": 117, "timeStamp": 428.60000002384186, "type": "mousemove" }, { "clientX": 432, "clientY": 117, "timeStamp": 429.5, "type": "mousemove" }, { "clientX": 432, "clientY": 116, "timeStamp": 430.60000002384186, "type": "mousemove" }, { "clientX": 430, "clientY": 115, "timeStamp": 431.5, "type": "mousemove" }, { "clientX": 429, "clientY": 115, "timeStamp": 433.5, "type": "mousemove" }, { "clientX": 428, "clientY": 115, "timeStamp": 434.5, "type": "mousemove" }, { "clientX": 427, "clientY": 114, "timeStamp": 435.5, "type": "mousemove" }, { "clientX": 426, "clientY": 114, "timeStamp": 436.60000002384186, "type": "mousemove" }, { "clientX": 425, "clientY": 114, "timeStamp": 437.5, "type": "mousemove" }, { "clientX": 424, "clientY": 113, "timeStamp": 438.5, "type": "mousemove" }, { "clientX": 423, "clientY": 112, "timeStamp": 440.5, "type": "mousemove" }, { "clientX": 422, "clientY": 112, "timeStamp": 441.40000000596046, "type": "mousemove" }, { "clientX": 421, "clientY": 112, "timeStamp": 443.60000002384186, "type": "mousemove" }, { "clientX": 420, "clientY": 111, "timeStamp": 444.5, "type": "mousemove" }, { "clientX": 419, "clientY": 111, "timeStamp": 446.60000002384186, "type": "mousemove" }, { "clientX": 418, "clientY": 111, "timeStamp": 447.5, "type": "mousemove" }, { "clientX": 417, "clientY": 111, "timeStamp": 448.5, "type": "mousemove" }, { "clientX": 417, "clientY": 110, "timeStamp": 449.5, "type": "mousemove" }, { "clientX": 416, "clientY": 110, "timeStamp": 451.60000002384186, "type": "mousemove" }, { "clientX": 416, "clientY": 109, "timeStamp": 452.5, "type": "mousemove" }, { "clientX": 415, "clientY": 109, "timeStamp": 453.40000000596046, "type": "mousemove" }, { "clientX": 414, "clientY": 109, "timeStamp": 455.5, "type": "mousemove" }, { "clientX": 413, "clientY": 109, "timeStamp": 459.40000000596046, "type": "mousemove" }, { "clientX": 413, "clientY": 108, "timeStamp": 460.5, "type": "mousemove" }, { "clientX": 414, "clientY": 108, "timeStamp": 539.9000000059605, "type": "mousemove" }, { "clientX": 414, "clientY": 108, "timeStamp": 561.3000000119209, "type": "mousedown" }, { "clientX": 415, "clientY": 108, "timeStamp": 580.9000000059605, "type": "mousemove" }, { "clientX": 416, "clientY": 108, "timeStamp": 596, "type": "mousemove" }, { "clientX": 416, "clientY": 109, "timeStamp": 604.5, "type": "mousemove" }, { "clientX": 417, "clientY": 109, "timeStamp": 607.1000000238419, "type": "mousemove" }, { "clientX": 417, "clientY": 110, "timeStamp": 608.8000000119209, "type": "mousemove" }, { "clientX": 418, "clientY": 111, "timeStamp": 613.8000000119209, "type": "mousemove" }, { "clientX": 419, "clientY": 111, "timeStamp": 618.8000000119209, "type": "mousemove" }, { "clientX": 419, "clientY": 112, "timeStamp": 620.3000000119209, "type": "mousemove" }, { "clientX": 420, "clientY": 113, "timeStamp": 621.6000000238419, "type": "mousemove" }, { "clientX": 420, "clientY": 114, "timeStamp": 624.6000000238419, "type": "mousemove" }, { "clientX": 421, "clientY": 114, "timeStamp": 626.5, "type": "mousemove" }, { "clientX": 421, "clientY": 115, "timeStamp": 628.6000000238419, "type": "mousemove" }, { "clientX": 422, "clientY": 116, "timeStamp": 631.5, "type": "mousemove" }, { "clientX": 423, "clientY": 116, "timeStamp": 633.5, "type": "mousemove" }, { "clientX": 423, "clientY": 117, "timeStamp": 635.6000000238419, "type": "mousemove" }, { "clientX": 423, "clientY": 118, "timeStamp": 636.4000000059605, "type": "mousemove" }, { "clientX": 424, "clientY": 118, "timeStamp": 637.5, "type": "mousemove" }, { "clientX": 424, "clientY": 119, "timeStamp": 639.4000000059605, "type": "mousemove" }, { "clientX": 425, "clientY": 119, "timeStamp": 640.4000000059605, "type": "mousemove" }, { "clientX": 425, "clientY": 120, "timeStamp": 641.4000000059605, "type": "mousemove" }, { "clientX": 426, "clientY": 121, "timeStamp": 643.4000000059605, "type": "mousemove" }, { "clientX": 427, "clientY": 121, "timeStamp": 644.4000000059605, "type": "mousemove" }, { "clientX": 427, "clientY": 122, "timeStamp": 645.4000000059605, "type": "mousemove" }, { "clientX": 428, "clientY": 123, "timeStamp": 647.5, "type": "mousemove" }, { "clientX": 429, "clientY": 124, "timeStamp": 650.3000000119209, "type": "mousemove" }, { "clientX": 430, "clientY": 125, "timeStamp": 652.6000000238419, "type": "mousemove" }, { "clientX": 430, "clientY": 126, "timeStamp": 653.5, "type": "mousemove" }, { "clientX": 431, "clientY": 126, "timeStamp": 654.6000000238419, "type": "mousemove" }, { "clientX": 432, "clientY": 127, "timeStamp": 656.5, "type": "mousemove" }, { "clientX": 432, "clientY": 128, "timeStamp": 658.6000000238419, "type": "mousemove" }, { "clientX": 433, "clientY": 128, "timeStamp": 659.6000000238419, "type": "mousemove" }, { "clientX": 434, "clientY": 128, "timeStamp": 661.4000000059605, "type": "mousemove" }, { "clientX": 435, "clientY": 130, "timeStamp": 662.4000000059605, "type": "mousemove" }, { "clientX": 436, "clientY": 130, "timeStamp": 665.2000000178814, "type": "mousemove" }, { "clientX": 436, "clientY": 131, "timeStamp": 666.3000000119209, "type": "mousemove" }, { "clientX": 437, "clientY": 132, "timeStamp": 668.3000000119209, "type": "mousemove" }, { "clientX": 438, "clientY": 132, "timeStamp": 670.5, "type": "mousemove" }, { "clientX": 439, "clientY": 133, "timeStamp": 673.4000000059605, "type": "mousemove" }, { "clientX": 439, "clientY": 134, "timeStamp": 674.6000000238419, "type": "mousemove" }, { "clientX": 440, "clientY": 134, "timeStamp": 677.6000000238419, "type": "mousemove" }, { "clientX": 440, "clientY": 135, "timeStamp": 679.5, "type": "mousemove" }, { "clientX": 441, "clientY": 135, "timeStamp": 681.5, "type": "mousemove" }, { "clientX": 442, "clientY": 136, "timeStamp": 686.2000000178814, "type": "mousemove" }, { "clientX": 443, "clientY": 136, "timeStamp": 690.3000000119209, "type": "mousemove" }, { "clientX": 443, "clientY": 137, "timeStamp": 695.4000000059605, "type": "mousemove" }, { "clientX": 443, "clientY": 138, "timeStamp": 756, "type": "mousemove" }, { "clientX": 444, "clientY": 138, "timeStamp": 763.8000000119209, "type": "mousemove" }, { "clientX": 444, "clientY": 138, "timeStamp": 766.5, "type": "mouseup" }, { "clientX": 444, "clientY": 138, "timeStamp": 770.6000000238419, "type": "mousemove" }, { "clientX": 445, "clientY": 138, "timeStamp": 780.8000000119209, "type": "mousemove" }, { "clientX": 445, "clientY": 139, "timeStamp": 789.3000000119209, "type": "mousemove" }, { "clientX": 445, "clientY": 140, "timeStamp": 801.5, "type": "mousemove" }, { "clientX": 445, "clientY": 141, "timeStamp": 815.9000000059605, "type": "mousemove" }, { "clientX": 445, "clientY": 142, "timeStamp": 824.8000000119209, "type": "mousemove" }, { "clientX": 445, "clientY": 143, "timeStamp": 829.4000000059605, "type": "mousemove" }, { "clientX": 444, "clientY": 143, "timeStamp": 831.7000000178814, "type": "mousemove" }, { "clientX": 444, "clientY": 144, "timeStamp": 836.4000000059605, "type": "mousemove" }, { "clientX": 443, "clientY": 144, "timeStamp": 837.6000000238419, "type": "mousemove" }, { "clientX": 442, "clientY": 145, "timeStamp": 841.3000000119209, "type": "mousemove" }, { "clientX": 442, "clientY": 146, "timeStamp": 843.6000000238419, "type": "mousemove" }, { "clientX": 441, "clientY": 146, "timeStamp": 847.4000000059605, "type": "mousemove" }, { "clientX": 441, "clientY": 147, "timeStamp": 849.6000000238419, "type": "mousemove" }, { "clientX": 440, "clientY": 148, "timeStamp": 852.6000000238419, "type": "mousemove" }, { "clientX": 440, "clientY": 149, "timeStamp": 856.6000000238419, "type": "mousemove" }, { "clientX": 439, "clientY": 149, "timeStamp": 857.5, "type": "mousemove" }, { "clientX": 439, "clientY": 150, "timeStamp": 858.6000000238419, "type": "mousemove" }, { "clientX": 439, "clientY": 151, "timeStamp": 861.3000000119209, "type": "mousemove" }, { "clientX": 438, "clientY": 151, "timeStamp": 862.5, "type": "mousemove" }, { "clientX": 437, "clientY": 152, "timeStamp": 864.6000000238419, "type": "mousemove" }, { "clientX": 436, "clientY": 153, "timeStamp": 867.4000000059605, "type": "mousemove" }, { "clientX": 436, "clientY": 154, "timeStamp": 868.4000000059605, "type": "mousemove" }, { "clientX": 436, "clientY": 155, "timeStamp": 870.5, "type": "mousemove" }, { "clientX": 435, "clientY": 155, "timeStamp": 871.5, "type": "mousemove" }, { "clientX": 435, "clientY": 156, "timeStamp": 872.4000000059605, "type": "mousemove" }, { "clientX": 434, "clientY": 156, "timeStamp": 874.4000000059605, "type": "mousemove" }, { "clientX": 434, "clientY": 157, "timeStamp": 875.5, "type": "mousemove" }, { "clientX": 434, "clientY": 158, "timeStamp": 876.4000000059605, "type": "mousemove" }, { "clientX": 433, "clientY": 158, "timeStamp": 877.4000000059605, "type": "mousemove" }, { "clientX": 433, "clientY": 159, "timeStamp": 878.5, "type": "mousemove" }, { "clientX": 432, "clientY": 159, "timeStamp": 879.5, "type": "mousemove" }, { "clientX": 432, "clientY": 160, "timeStamp": 880.5, "type": "mousemove" }, { "clientX": 432, "clientY": 161, "timeStamp": 882.5, "type": "mousemove" }, { "clientX": 431, "clientY": 162, "timeStamp": 883.5, "type": "mousemove" }, { "clientX": 430, "clientY": 162, "timeStamp": 885.6000000238419, "type": "mousemove" }, { "clientX": 430, "clientY": 163, "timeStamp": 886.4000000059605, "type": "mousemove" }, { "clientX": 429, "clientY": 163, "timeStamp": 888.5, "type": "mousemove" }, { "clientX": 429, "clientY": 164, "timeStamp": 889.4000000059605, "type": "mousemove" }, { "clientX": 428, "clientY": 165, "timeStamp": 891.5, "type": "mousemove" }, { "clientX": 428, "clientY": 166, "timeStamp": 892.4000000059605, "type": "mousemove" }, { "clientX": 427, "clientY": 166, "timeStamp": 894.5, "type": "mousemove" }, { "clientX": 426, "clientY": 167, "timeStamp": 895.4000000059605, "type": "mousemove" }, { "clientX": 426, "clientY": 168, "timeStamp": 897.4000000059605, "type": "mousemove" }, { "clientX": 425, "clientY": 168, "timeStamp": 898.4000000059605, "type": "mousemove" }, { "clientX": 425, "clientY": 169, "timeStamp": 900.4000000059605, "type": "mousemove" }, { "clientX": 423, "clientY": 170, "timeStamp": 901.5, "type": "mousemove" }, { "clientX": 423, "clientY": 171, "timeStamp": 904.5, "type": "mousemove" }, { "clientX": 422, "clientY": 171, "timeStamp": 905.5, "type": "mousemove" }, { "clientX": 422, "clientY": 172, "timeStamp": 906.5, "type": "mousemove" }, { "clientX": 421, "clientY": 172, "timeStamp": 907.5, "type": "mousemove" }, { "clientX": 420, "clientY": 173, "timeStamp": 909.4000000059605, "type": "mousemove" }, { "clientX": 420, "clientY": 174, "timeStamp": 910.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 175, "timeStamp": 912.5, "type": "mousemove" }, { "clientX": 418, "clientY": 175, "timeStamp": 913.5, "type": "mousemove" }, { "clientX": 417, "clientY": 176, "timeStamp": 915.5, "type": "mousemove" }, { "clientX": 416, "clientY": 176, "timeStamp": 917.4000000059605, "type": "mousemove" }, { "clientX": 416, "clientY": 177, "timeStamp": 918.5, "type": "mousemove" }, { "clientX": 415, "clientY": 178, "timeStamp": 920.4000000059605, "type": "mousemove" }, { "clientX": 414, "clientY": 178, "timeStamp": 921.5, "type": "mousemove" }, { "clientX": 414, "clientY": 179, "timeStamp": 922.4000000059605, "type": "mousemove" }, { "clientX": 413, "clientY": 179, "timeStamp": 923.5, "type": "mousemove" }, { "clientX": 412, "clientY": 180, "timeStamp": 925.5, "type": "mousemove" }, { "clientX": 411, "clientY": 180, "timeStamp": 929.3000000119209, "type": "mousemove" }, { "clientX": 410, "clientY": 181, "timeStamp": 930.6000000238419, "type": "mousemove" }, { "clientX": 410, "clientY": 182, "timeStamp": 931.7000000178814, "type": "mousemove" }, { "clientX": 409, "clientY": 182, "timeStamp": 933.6000000238419, "type": "mousemove" }, { "clientX": 408, "clientY": 183, "timeStamp": 936.2000000178814, "type": "mousemove" }, { "clientX": 407, "clientY": 183, "timeStamp": 938.6000000238419, "type": "mousemove" }, { "clientX": 406, "clientY": 184, "timeStamp": 940.5, "type": "mousemove" }, { "clientX": 405, "clientY": 184, "timeStamp": 942.5, "type": "mousemove" }, { "clientX": 404, "clientY": 185, "timeStamp": 945.7000000178814, "type": "mousemove" }, { "clientX": 403, "clientY": 186, "timeStamp": 947.7000000178814, "type": "mousemove" }, { "clientX": 402, "clientY": 186, "timeStamp": 949.6000000238419, "type": "mousemove" }, { "clientX": 401, "clientY": 186, "timeStamp": 952.6000000238419, "type": "mousemove" }, { "clientX": 401, "clientY": 187, "timeStamp": 953.6000000238419, "type": "mousemove" }, { "clientX": 400, "clientY": 187, "timeStamp": 955.6000000238419, "type": "mousemove" }, { "clientX": 399, "clientY": 187, "timeStamp": 956.6000000238419, "type": "mousemove" }, { "clientX": 399, "clientY": 188, "timeStamp": 957.4000000059605, "type": "mousemove" }, { "clientX": 398, "clientY": 188, "timeStamp": 959.5, "type": "mousemove" }, { "clientX": 397, "clientY": 188, "timeStamp": 962.7000000178814, "type": "mousemove" }, { "clientX": 397, "clientY": 189, "timeStamp": 963.6000000238419, "type": "mousemove" }, { "clientX": 396, "clientY": 189, "timeStamp": 965.5, "type": "mousemove" }, { "clientX": 396, "clientY": 190, "timeStamp": 966.6000000238419, "type": "mousemove" }, { "clientX": 395, "clientY": 190, "timeStamp": 967.6000000238419, "type": "mousemove" }, { "clientX": 394, "clientY": 190, "timeStamp": 969.6000000238419, "type": "mousemove" }, { "clientX": 393, "clientY": 190, "timeStamp": 972.6000000238419, "type": "mousemove" }, { "clientX": 392, "clientY": 191, "timeStamp": 975.5, "type": "mousemove" }, { "clientX": 391, "clientY": 191, "timeStamp": 979.9000000059605, "type": "mousemove" }, { "clientX": 390, "clientY": 191, "timeStamp": 981.4000000059605, "type": "mousemove" }, { "clientX": 389, "clientY": 192, "timeStamp": 985.7000000178814, "type": "mousemove" }, { "clientX": 388, "clientY": 192, "timeStamp": 989.5, "type": "mousemove" }, { "clientX": 387, "clientY": 192, "timeStamp": 994.9000000059605, "type": "mousemove" }, { "clientX": 386, "clientY": 192, "timeStamp": 996.6000000238419, "type": "mousemove" }, { "clientX": 385, "clientY": 192, "timeStamp": 1000.3000000119209, "type": "mousemove" }, { "clientX": 384, "clientY": 192, "timeStamp": 1004.3000000119209, "type": "mousemove" }, { "clientX": 383, "clientY": 192, "timeStamp": 1007.8000000119209, "type": "mousemove" }, { "clientX": 383, "clientY": 193, "timeStamp": 1008.9000000059605, "type": "mousemove" }, { "clientX": 382, "clientY": 193, "timeStamp": 1009.4000000059605, "type": "mousemove" }, { "clientX": 381, "clientY": 193, "timeStamp": 1012.7000000178814, "type": "mousemove" }, { "clientX": 380, "clientY": 194, "timeStamp": 1016.3000000119209, "type": "mousemove" }, { "clientX": 379, "clientY": 194, "timeStamp": 1019.3000000119209, "type": "mousemove" }, { "clientX": 378, "clientY": 194, "timeStamp": 1020.8000000119209, "type": "mousemove" }, { "clientX": 377, "clientY": 194, "timeStamp": 1024.6000000238419, "type": "mousemove" }, { "clientX": 376, "clientY": 194, "timeStamp": 1026.6000000238419, "type": "mousemove" }, { "clientX": 375, "clientY": 194, "timeStamp": 1030.300000011921, "type": "mousemove" }, { "clientX": 374, "clientY": 194, "timeStamp": 1031.4000000059605, "type": "mousemove" }, { "clientX": 373, "clientY": 194, "timeStamp": 1035.4000000059605, "type": "mousemove" }, { "clientX": 372, "clientY": 194, "timeStamp": 1038.300000011921, "type": "mousemove" }, { "clientX": 371, "clientY": 194, "timeStamp": 1042.300000011921, "type": "mousemove" }, { "clientX": 370, "clientY": 195, "timeStamp": 1044.300000011921, "type": "mousemove" }, { "clientX": 369, "clientY": 195, "timeStamp": 1049.300000011921, "type": "mousemove" }, { "clientX": 368, "clientY": 195, "timeStamp": 1057.300000011921, "type": "mousemove" }, { "clientX": 367, "clientY": 195, "timeStamp": 1066.300000011921, "type": "mousemove" }, { "clientX": 367, "clientY": 195, "timeStamp": 1148.800000011921, "type": "mousedown" }, { "clientX": 368, "clientY": 195, "timeStamp": 1162.4000000059605, "type": "mousemove" }, { "clientX": 369, "clientY": 195, "timeStamp": 1178.4000000059605, "type": "mousemove" }, { "clientX": 370, "clientY": 195, "timeStamp": 1183.9000000059605, "type": "mousemove" }, { "clientX": 371, "clientY": 195, "timeStamp": 1186.5, "type": "mousemove" }, { "clientX": 372, "clientY": 195, "timeStamp": 1191.4000000059605, "type": "mousemove" }, { "clientX": 373, "clientY": 195, "timeStamp": 1194.4000000059605, "type": "mousemove" }, { "clientX": 374, "clientY": 195, "timeStamp": 1198.4000000059605, "type": "mousemove" }, { "clientX": 375, "clientY": 195, "timeStamp": 1199.6000000238419, "type": "mousemove" }, { "clientX": 376, "clientY": 195, "timeStamp": 1202.6000000238419, "type": "mousemove" }, { "clientX": 377, "clientY": 195, "timeStamp": 1204.5, "type": "mousemove" }, { "clientX": 378, "clientY": 195, "timeStamp": 1207.4000000059605, "type": "mousemove" }, { "clientX": 379, "clientY": 195, "timeStamp": 1208.4000000059605, "type": "mousemove" }, { "clientX": 380, "clientY": 195, "timeStamp": 1211.4000000059605, "type": "mousemove" }, { "clientX": 380, "clientY": 194, "timeStamp": 1212.6000000238419, "type": "mousemove" }, { "clientX": 381, "clientY": 194, "timeStamp": 1213.5, "type": "mousemove" }, { "clientX": 382, "clientY": 194, "timeStamp": 1216.300000011921, "type": "mousemove" }, { "clientX": 383, "clientY": 193, "timeStamp": 1217.6000000238419, "type": "mousemove" }, { "clientX": 384, "clientY": 193, "timeStamp": 1218.300000011921, "type": "mousemove" }, { "clientX": 385, "clientY": 193, "timeStamp": 1221.5, "type": "mousemove" }, { "clientX": 386, "clientY": 193, "timeStamp": 1223.5, "type": "mousemove" }, { "clientX": 387, "clientY": 193, "timeStamp": 1224.300000011921, "type": "mousemove" }, { "clientX": 388, "clientY": 193, "timeStamp": 1226.4000000059605, "type": "mousemove" }, { "clientX": 388, "clientY": 192, "timeStamp": 1228.4000000059605, "type": "mousemove" }, { "clientX": 389, "clientY": 192, "timeStamp": 1229.4000000059605, "type": "mousemove" }, { "clientX": 390, "clientY": 192, "timeStamp": 1231.5, "type": "mousemove" }, { "clientX": 391, "clientY": 192, "timeStamp": 1232.5, "type": "mousemove" }, { "clientX": 392, "clientY": 192, "timeStamp": 1234.4000000059605, "type": "mousemove" }, { "clientX": 392, "clientY": 191, "timeStamp": 1236.5, "type": "mousemove" }, { "clientX": 393, "clientY": 191, "timeStamp": 1237.300000011921, "type": "mousemove" }, { "clientX": 394, "clientY": 191, "timeStamp": 1240.7000000178814, "type": "mousemove" }, { "clientX": 395, "clientY": 191, "timeStamp": 1241.4000000059605, "type": "mousemove" }, { "clientX": 396, "clientY": 191, "timeStamp": 1243.4000000059605, "type": "mousemove" }, { "clientX": 396, "clientY": 190, "timeStamp": 1244.4000000059605, "type": "mousemove" }, { "clientX": 397, "clientY": 190, "timeStamp": 1245.4000000059605, "type": "mousemove" }, { "clientX": 398, "clientY": 190, "timeStamp": 1248.6000000238419, "type": "mousemove" }, { "clientX": 399, "clientY": 189, "timeStamp": 1249.5, "type": "mousemove" }, { "clientX": 400, "clientY": 189, "timeStamp": 1252.4000000059605, "type": "mousemove" }, { "clientX": 401, "clientY": 189, "timeStamp": 1256.300000011921, "type": "mousemove" }, { "clientX": 402, "clientY": 189, "timeStamp": 1258.7000000178814, "type": "mousemove" }, { "clientX": 403, "clientY": 188, "timeStamp": 1260.6000000238419, "type": "mousemove" }, { "clientX": 404, "clientY": 188, "timeStamp": 1264.4000000059605, "type": "mousemove" }, { "clientX": 405, "clientY": 188, "timeStamp": 1267.7000000178814, "type": "mousemove" }, { "clientX": 406, "clientY": 188, "timeStamp": 1271.7000000178814, "type": "mousemove" }, { "clientX": 407, "clientY": 188, "timeStamp": 1274.4000000059605, "type": "mousemove" }, { "clientX": 408, "clientY": 188, "timeStamp": 1279.4000000059605, "type": "mousemove" }, { "clientX": 408, "clientY": 187, "timeStamp": 1282.800000011921, "type": "mousemove" }, { "clientX": 409, "clientY": 187, "timeStamp": 1286.300000011921, "type": "mousemove" }, { "clientX": 410, "clientY": 187, "timeStamp": 1292.4000000059605, "type": "mousemove" }, { "clientX": 411, "clientY": 187, "timeStamp": 1298.9000000059605, "type": "mousemove" }, { "clientX": 412, "clientY": 187, "timeStamp": 1305.7000000178814, "type": "mousemove" }, { "clientX": 413, "clientY": 187, "timeStamp": 1311.7000000178814, "type": "mousemove" }, { "clientX": 414, "clientY": 187, "timeStamp": 1315.7000000178814, "type": "mousemove" }, { "clientX": 415, "clientY": 187, "timeStamp": 1321.4000000059605, "type": "mousemove" }, { "clientX": 416, "clientY": 187, "timeStamp": 1324.4000000059605, "type": "mousemove" }, { "clientX": 417, "clientY": 187, "timeStamp": 1328.800000011921, "type": "mousemove" }, { "clientX": 418, "clientY": 187, "timeStamp": 1336.800000011921, "type": "mousemove" }, { "clientX": 419, "clientY": 187, "timeStamp": 1346.800000011921, "type": "mousemove" }, { "clientX": 419, "clientY": 188, "timeStamp": 1431.800000011921, "type": "mousemove" }, { "clientX": 419, "clientY": 189, "timeStamp": 1440.800000011921, "type": "mousemove" }, { "clientX": 419, "clientY": 190, "timeStamp": 1444.6000000238419, "type": "mousemove" }, { "clientX": 419, "clientY": 191, "timeStamp": 1451.7000000178814, "type": "mousemove" }, { "clientX": 419, "clientY": 192, "timeStamp": 1458.5, "type": "mousemove" }, { "clientX": 419, "clientY": 193, "timeStamp": 1463.5, "type": "mousemove" }, { "clientX": 419, "clientY": 194, "timeStamp": 1466.800000011921, "type": "mousemove" }, { "clientX": 419, "clientY": 195, "timeStamp": 1471.9000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 196, "timeStamp": 1474.7000000178814, "type": "mousemove" }, { "clientX": 419, "clientY": 197, "timeStamp": 1478.7000000178814, "type": "mousemove" }, { "clientX": 419, "clientY": 198, "timeStamp": 1480.7000000178814, "type": "mousemove" }, { "clientX": 419, "clientY": 199, "timeStamp": 1483.800000011921, "type": "mousemove" }, { "clientX": 419, "clientY": 200, "timeStamp": 1486.6000000238419, "type": "mousemove" }, { "clientX": 419, "clientY": 201, "timeStamp": 1489.6000000238419, "type": "mousemove" }, { "clientX": 419, "clientY": 202, "timeStamp": 1491.6000000238419, "type": "mousemove" }, { "clientX": 419, "clientY": 203, "timeStamp": 1493.7000000178814, "type": "mousemove" }, { "clientX": 419, "clientY": 204, "timeStamp": 1496.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 205, "timeStamp": 1497.7000000178814, "type": "mousemove" }, { "clientX": 419, "clientY": 206, "timeStamp": 1498.5, "type": "mousemove" }, { "clientX": 419, "clientY": 207, "timeStamp": 1501.6000000238419, "type": "mousemove" }, { "clientX": 419, "clientY": 208, "timeStamp": 1503.6000000238419, "type": "mousemove" }, { "clientX": 419, "clientY": 209, "timeStamp": 1505.5, "type": "mousemove" }, { "clientX": 419, "clientY": 210, "timeStamp": 1506.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 211, "timeStamp": 1508.5, "type": "mousemove" }, { "clientX": 419, "clientY": 212, "timeStamp": 1510.5, "type": "mousemove" }, { "clientX": 419, "clientY": 213, "timeStamp": 1511.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 214, "timeStamp": 1513.5, "type": "mousemove" }, { "clientX": 419, "clientY": 215, "timeStamp": 1515.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 217, "timeStamp": 1518.800000011921, "type": "mousemove" }, { "clientX": 419, "clientY": 218, "timeStamp": 1520.5, "type": "mousemove" }, { "clientX": 419, "clientY": 219, "timeStamp": 1522.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 220, "timeStamp": 1523.300000011921, "type": "mousemove" }, { "clientX": 419, "clientY": 221, "timeStamp": 1525.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 222, "timeStamp": 1526.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 223, "timeStamp": 1528.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 224, "timeStamp": 1529.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 225, "timeStamp": 1530.5, "type": "mousemove" }, { "clientX": 419, "clientY": 226, "timeStamp": 1532.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 227, "timeStamp": 1533.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 228, "timeStamp": 1534.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 230, "timeStamp": 1536.4000000059605, "type": "mousemove" }, { "clientX": 419, "clientY": 231, "timeStamp": 1538.5, "type": "mousemove" }, { "clientX": 419, "clientY": 232, "timeStamp": 1540.5, "type": "mousemove" }];
-})();
+//     Date.now = v9ng.toolsFunc.funcHook(Date.now, undefined, false, v9ng.toolsFunc.noopFunc, onLeaveForTime);
+//     Date.prototype.getTime = v9ng.toolsFunc.funcHook(Date.prototype.getTime, undefined, false, v9ng.toolsFunc.noopFunc, onLeaveForTime);
+//     Math.random = v9ng.toolsFunc.funcHook(Math.random, undefined, false, v9ng.toolsFunc.noopFunc, onLeaveForRandom);
+// })();
 /* Proxy Objects */
 (function () {
     sessionStorage = v9ng.toolsFunc.objProxy(sessionStorage, "sessionStorage");
@@ -15305,8 +24851,11 @@ ${v9ng.toolsFunc.commToString(args)}`);
     window = v9ng.toolsFunc.objProxy(window, "window");
 })();
 console.log('---- DEBUG ----');
-// debugger;
-(function () {
+
+debugger;
+$_ts=window['$_ts'];if(!$_ts)$_ts={};$_ts.scj=[];$_ts['dfe1675']='þú>þóþôþ=þ/ÿ[ÿ=ÿ(ÿ,ÿÿ;ÿ.ÿ);ÿ){ÿ[0]](ÿvar ÿ){var ÿ=0;ÿ<ÿ++ ]=ÿ]=ÿ;}function ÿ=0,ÿ.push(ÿ&&ÿ){if(ÿ);}function ÿ)ÿ+ÿ!==ÿ();ÿ===ÿ!=ÿ=new ÿ++ ){ÿ];ÿ);if(ÿ||ÿreturn ÿ;var ÿ.length;ÿ;if(ÿ){}ÿ(257,ÿ(){var ÿ+=ÿ(){return ÿtry{ÿ(235,ÿ=[],ÿ==ÿif( !ÿ(135,ÿfor(ÿ),ÿ-ÿ[3]]==ÿ;}ÿ){return ÿ][ÿ));ÿ.prototype[ÿ;function ÿ);return ÿ;return ÿ=(ÿ);}ÿ;}}function ÿ=1;ÿ(249,ÿ];if(ÿ=[ÿ=[];ÿ);var ÿ[8]](ÿ()[ÿ++ ;ÿ=0;var ÿ= !ÿ()-ÿ)){ÿ in ÿ,true);ÿ; ++ÿ;}else{ÿ.length,ÿ?ÿ(){ÿ){if( typeof ÿ);}return ÿ);}else{ÿ);}}function ÿ();var ÿ]===ÿ;}return ÿ],ÿ++ );ÿ.body[ÿ);}if(ÿ){if( !ÿ();if(ÿ,0,ÿ:case ÿ={},ÿ.Math[ÿ[9]](ÿ*ÿ>0){ÿ[21]](ÿ++ ){if(ÿ.length; ++ÿ](ÿ[81]](ÿ=1;var ÿ[13]](ÿ.style[ÿ[41]](ÿ[1];ÿ++ ]=(ÿ++ ];ÿ)){var ÿ^ÿ+=2;ÿ,0);ÿ;}else if(ÿ[53],ÿ[5]](ÿ[6])ÿ(){if(ÿ){}function ÿ ++ÿ;for(ÿ={};ÿ:ÿtry{if(ÿ&ÿ);}var ÿ[1]](ÿ=this.ÿ++ ){var ÿ&&(ÿ+=1;ÿ[93]](ÿ.navigator[ÿ[64]](ÿ);function ÿ[34]](ÿ[26]](ÿ[3];ÿ.length;var ÿ)){if(ÿ]|ÿ):ÿ);}catch(ÿ){return;}ÿ;}if(ÿ.join(\'\');}function ÿ]);ÿ[0];ÿ[0],ÿ&255]^ÿ());ÿ);}}catch(ÿ=0;for(var ÿ));}function ÿ)*(ÿ[36]]=ÿ[77],ÿ[32]](null,ÿ+1)%ÿ;}for(ÿ.documentElement[ÿ.get(ÿ.length===4){ÿ);while(ÿ(114,ÿ>>>24]^ÿreturn;ÿ)||(ÿ+\"=\"+ÿ<256;ÿ===0){ÿ>=3){ÿ+1;ÿ)===ÿ;this[ÿ=2;ÿ+=5;ÿ=0;if(ÿ)|0;ÿ[73]](ÿ(655,ÿ[38]]=ÿ[19]]=ÿ)+ÿ>>8&255]^ÿ>>16&255]^ÿ[51]](ÿ[16]]=ÿ);}else if(ÿ(552,ÿ[7])];ÿ.length;while(ÿ[31]](ÿ[4]]=ÿ.set(ÿ+=3;ÿ=false,ÿ>0;ÿ<4;ÿ=true;ÿ&=ÿ(),ÿ>=40&&ÿ<127){ÿ[86]](ÿreturn[ÿ[54]){ÿ){for(var ÿ>=92)ÿ||(ÿ[1]+ÿ[37]+ÿ);}else{return ÿ.external[ÿ;}}if(ÿ|=ÿ].y-ÿ>=2){ÿ[((ÿ;}}ÿ.x*ÿ(13,ÿ.sqrt((ÿ[(ÿ.y);ÿ[55]](ÿ.target[ÿ[205],ÿ;}catch(ÿ>=127)ÿ.y*ÿ=100;var ÿ.x)+(ÿ[4],ÿ+\'=\'+ÿ|| !ÿ=((ÿ=0;while(ÿ){this[ÿ+=9;ÿ){}}function ÿ.length===16){ÿ&& !ÿ);}}}ÿ:if(ÿ>8;ÿ[5]]((ÿ]=(ÿ;(ÿ]!==ÿ+=4;ÿ.length-ÿ=2,ÿ[125]](ÿ;this.ÿ];}return ÿ.length-1;ÿ);}else if((ÿ];}ÿ]^=ÿ[90],ÿ[42],ÿ[74],ÿ;){ÿ[2];ÿ;}}catch(ÿ[15],ÿ)%ÿ();}ÿ[76]]=ÿ){try{var ÿ[47]]===ÿ+=7;ÿ[23];ÿ+=13;ÿ[226]]=ÿ(4)+ÿ%ÿ);}}ÿ];}}function ÿ;}var ÿ];}function ÿ;for(var ÿ[60]);ÿ.max(ÿ=[];for(var ÿ)return ÿ[493]](ÿ[18]](ÿ<92){ÿ){try{if(ÿ[1],ÿ-- ;if(ÿ[0]](this,ÿ[61],ÿ[0][ÿ){}}}function ÿ]=\"\";ÿ.parentNode[ÿ[4]],ÿ,true);}function ÿ()){ÿ[296],ÿ();}function ÿ(0xFFFFFFFF),ÿ[44]]=ÿ[203],ÿtry{return ÿ)/2);if(ÿ.src=ÿ+=(ÿ);}}}catch(ÿ[40]]=ÿ[147],ÿ<<1^(ÿ[43]];ÿ[10]]===ÿ){try{ÿ)&&ÿ,\',\');ÿ[97]](ÿ():ÿ()+ÿ=\'\';var ÿ;}}}}if(ÿ|=2;ÿ.MediaStreamTrack[ÿ();}else{ÿ[495])){ÿ[12]]==ÿ[211]];ÿ(128),ÿ)*2+ÿ[68]]&&(ÿ[228]]=ÿ.z;ÿ===2||ÿ+(ÿ[1]](0,4);ÿ>=ÿ)return;if( typeof ÿ[71]](ÿ-1);var ÿ[194]](ÿ[4];for(ÿ.objectStoreNames[ÿ];}if(ÿ[32]](this,arguments);}function ÿ[5];ÿ[16]]!=null){ÿ=3;var ÿ(78,ÿ(7);ÿ|=2;}ÿ++ ;}else{ÿ[520]](ÿ[302])ÿ[128]]=ÿ)]=ÿ[32]](ÿ[36]]=null;ÿ<<2,( ++ÿ].y,ÿ[477]]===ÿ[26]]=ÿ[110]](ÿ[24]](ÿ(){return(ÿ/ÿ.mediaDevices[ÿfor(var ÿ(){return[ÿ.x-ÿ.x,ÿ.x+ÿ;}else{return ÿ.length>10;ÿ(5)-ÿ[4];var ÿ[3]]){case ÿ[360]]==ÿ]!=ÿ.abs(ÿ>>>16)&0xFF;ÿ].x-ÿ[7])];if(ÿ].x*ÿ[66]){ÿ[47]]+\"//\"+ÿ-1;else if(ÿ[475]].sdp,\'\\n\');ÿ<<24^ÿ.y;ÿ.y-ÿ>>8&255]<<8^ÿ=1;if(ÿ=5,ÿ=5;ÿ[223],ÿ[31]]((ÿ(23,ÿ[11]);ÿ+1];ÿ|=1048576;ÿ[48]]==ÿ; --ÿ[392],ÿ=4,ÿ>>>24]<<24^ÿ(11,ÿ&0xFF;}return ÿ===2){ÿ>0){for(var ÿ[253],ÿ[510]](ÿ(256),ÿ==\'x\'?ÿ>>>8)&0xFF;ÿ[3],ÿ=3,ÿ[419]](ÿ=3;ÿ]]===ÿ[463]](ÿ[46]](ÿ= typeof ÿ>>2];ÿ[535]]&& !ÿ[537]](ÿ);return new ÿ){return(ÿ,\"&\"+ÿ;}break;case ÿ[29]]){ÿ[156]](0)!==ÿ){return[(ÿ=false;ÿ[1]](0);ÿ=false;}if(ÿ[545]]!==ÿ[32]]([],ÿ=[];var ÿ=5;return ÿ+=16;ÿ(16)+ÿ[2]);if(ÿ[509]);ÿ(2,ÿ[175]](ÿ[4]];ÿ.length===16){if( !ÿ[277]](ÿ=== -1)return[ÿ.length>10){ÿ[25]&&ÿ=1,ÿ.x);ÿ+=15;ÿ===\'\';ÿ[2],ÿ[6];ÿ[306]](ÿ[71]]([ÿ[52]);var ÿ[72]](ÿ));}else if(ÿ.length===4;ÿ[2]^ÿ[232]](ÿ.length-1){ÿ=3;if( typeof ÿ[0]);if(ÿ=null;var ÿ<2)return 1;return ÿ]]=ÿ===1){ÿ,1,ÿ++ ;}ÿ+=14;ÿ(new ÿ)/ÿ[20]],ÿ[538]])){ÿ[57]]=ÿ>>>24)&0xFF;ÿ<=ÿ[547]](ÿ[337]]||ÿ={};if(ÿ[447]](ÿ[229]){ÿ(554,ÿ(){this.ÿ[433]],ÿ[313]];ÿ[489]](ÿ&& typeof ÿ=0;}function ÿ>=93&&ÿ.chrome[ÿ(112);ÿ+\"&\"+ÿ[467],ÿ)=== -1;ÿ++ ;}else if(ÿ[388]];ÿ!=null){ÿ.length-1];ÿ<100&& !(ÿ>=8&& !ÿ-1+ÿ(174);ÿ-1;ÿ[507]](ÿ=1;}}}if(ÿ[16]]);ÿ++ ;}}}ÿ[1]](0,ÿ+=11;ÿ[6])return(ÿ^=ÿ[9]](\"a\");ÿ()));ÿ.length===16;ÿ[27]].prototype[ÿ&3)<<4)|(ÿ();function ÿ>0||ÿ[0]^ÿ[518],ÿ)<<2);ÿ[39]],ÿ=null;if( !this.ÿ[195])in ÿ[2]].concat[ÿ.pop();if(ÿ[9]](\'div\');ÿ(1);ÿ(684,ÿ>>16&255]<<16^ÿ[59]],ÿ[7])].userAgent[ÿ||0;if(ÿ[45]](ÿ-1);}function ÿ=3;if(ÿ));return ÿ]);}}ÿ)|(ÿ-52;}else if(ÿ)||ÿ[251]);var ÿ));}}}}else if(ÿ+1);else if(ÿ[56]])+ÿ[0]++ ;}else if(ÿ[50]);if(ÿ,100);ÿ(584);ÿ[58]]();var ÿ[16]];}return ÿ[17]];var ÿ++ ]<<16)|(ÿ[498]),ÿ===\'\')))&&ÿ>>16&255]]^ÿ[279];ÿ|=1073741824;if(ÿ.length-4;var ÿ(26);ÿ|=524288;}}catch(ÿ[33]];}if(ÿ+1]^=ÿ===null&&ÿ.join(\"/\");if(ÿ={\'\\b\':\'\\\\b\',\'\\t\':\'\\\\t\',\'\\n\':\'\\\\n\',\'\\f\':\'\\\\f\',\'\\r\':\'\\\\r\',\'\"\':\'\\\\\"\',\'\\\\\':ÿ[14]=ÿ[14];ÿ.y)));if(ÿ[43]]=ÿ:\'\\\\u\'+ÿ);this.ÿ[50],ÿ=true;break;}}}ÿ];}}return ÿ=\'abs\';ÿ=0xFE;var ÿ={\'tests\':3};if(ÿ(9)));}function ÿ-4];if(ÿ=6;var ÿ[12]],ÿ.length);}}function ÿ[529],ÿ[10];ÿ[382]]||ÿ(\'f|zgg`ngd|~`kmjojotk~`otk~`cm~a`agjjm`nomdib`otg|omgzux`|ji|zo`|m~zo~@g~h~io`m~z}tNozo~`$_am`{pooji`m~hjq~>cdg}`nzazmd`$_aki,`|gd~io?zoz`gj|zgNojmzb~`nomdibdat`jinp||~nn`gj|zodji`b~o@g~h~io=tD}`np{hdo`cd}}~i`n~o<oomd{po~`cook5`jk~i`COHGAjmh@g~h~io`ozmb~o`notg~`}j|ph~io@g~h~io`mjpi}`zkkgt`cjnoizh~`cznJriKmjk~mot`$_a,`jim~z}tnozo~|czib~`ANN==`dii~mCOHG`n~oOdh~jpo`|jjfd~`z}}@q~ioGdno~i~m`$_ELic`|g~zmDio~mqzg`qdnd{dgdot`n~i}`|czm>j}~<o`kmjoj|jg`pn~m<b~io`cjno`$_a+`b~o@g~h~ion=tOzbIzh~`@f|K`gjz}`cookn5`|~dg`kzocizh~`}zoz`ojNomdib`}j|ph~io`$_ac+`$_qq>D`kjmo`zkkQ~mndji`nkgd|~`Hd|mjH~nn~ib~m`iph{~m`n~zm|c`di}~s~}?=`b~oOdh~`m~kgz|~`omzinz|odji`hzo|c`di}~sJa`f~t}jri`f~t>j}~`izh~`$_|?mj`Hzoc`M~lp~no`n|mdko`zkk~i}>cdg}`___on___`m~hjq~@q~ioGdno~i~m`jmdbdi`ajion`b~o<oomd{po~`<|odq~SJ{e~|o`m~npgo`${_|zggCzi}g~m`dikpo`odh~Nozhk`|ziqzn`n~oDio~mqzg`{j}t`SHGCookM~lp~no`api|odji`b~o>jio~so`amjh>czm>j}~`nkgdo`dnAdido~`|cmjh~`}~|j}~PMD>jhkji~io`i?cuowBuyqP?cuowBuyq`J{e~|o)Die~|o~}N|mdko)~qzgpzo~`e{n|c~h~5**`B~o<ggM~nkjin~C~z}~mn`F~t{jzm}`Hnshg-)SHGCOOK`rd}oc`ajm@z|c`km~|dndji`ajioGdno`{kz_zlc|a}Zkzziiemb}f~`*O2<tOmsjRsB}`b~o>gd~io?zozDi>jjfd~`}phk<gg`Vizodq~ |j}~]`]97d97*d97!V~i}da]((9`poa(3`ANN=<`jaan~oS`|czmbdib`q~mo~sKjn<mmzt`v3d~k7hcdnC3d~k7hcdn=sl> Vbshud9 Xnmsqnk =HGBahs>`o~no`s9[;gd)zvDweygd`|gd~ioDiajmhzodji`ji~mmjm`r~{fdoMO>K~~m>jii~|odji`nc~iedzi`hjuDo~hn`DIN@MO JM M@KG<>@ DIOJ @f|K_o Wizh~[ qzgp~X Q<GP@NW:[ :X`ji{~ajm~pigjz}`n~mq~m?zoz`ozbIzh~`${_ji=md}b~M~z}t`|m~zo~=paa~m`s;gd<10qi1ui_92-59)_`{6izd}{n c|7\"zz2,ed\" {fymmc|7\"{fmc|4-*/*~2+3[32z/[++{~[zz2,[**yy**z|{}*z\" qc|nb7\"*jr\" b}cabn7\"*jr\"86)izd}{n8`B~oM~nkjin~C~z}~m`jipkbmz}~i~~}~}`|flAb{{|g`nozopn`~iz{g~8omp~`?dnkzo|c@q~io`K~majmhzi|~J{n~mq~m`ojp|c~i}`ojp|c~n`nozi}zgji~`CDBC_AGJ<O`n~o>gd~io?zoz`m~nkjin~O~so`Hnshg-)SHGCOOK)/)+`kzm~io@g~h~io`co\\\\gR\\\\Obsh{jw ucvw\\\\]\\\\gRq`|czm<o`zgkcz`>M@<O@ O<=G@ DA IJO @SDNON @f|K_o Wd} DIO@B@M IJO IPGG KMDH<MT F@T <POJDI>M@H@IO[ izh~ O@SO IJO IPGG[ qzgp~ O@SO IJO IPGG[ PIDLP@ Wizh~XX`Hd|mjnjao)SHGCOOK`|jjfd~@iz{g~}`lm|fgh?j@socREdC<k,nQTFP.MAHLr3DBaKJ4-{qGIe)2uS=zNip+O>1bt_/U~0}vxwy !#$%WXYZ[(68:;V]^`r~{nojm~`aHyubFbuoyh`duviztv~bgzba`;}~{pbb~m`{di}=paa~m`lar|rkrur}dlqjwpn`n|m~~iT`W~qzgpzodib \\\'ipggV+]\\\'X`__zi|cjm__`hjpn~Jq~m`Bzh~kz}`Hnshg-)SHGCOOK)0)+`{{3-fe`|m~zo~Ncz}~m`gjz}~}`s__584__,33/_238-*-)6`iji~`OMD<IBG@_NOMDK`mu{-zmlmv|qit{` c~dbco81 rd}oc8, otk~8zkkgd|zodji*s(ncj|frzq~(agznc nm|8`<MN~nndji[<p}djOmz|fGdno[=~ajm~DinozggKmjhko@q~io)kmjojotk~)F@TPK[=gj{?jrigjz}>zgg{z|f[>?<O<N~|odji)kmjojotk~)m~hjq~[>NN>czmn~oMpg~[>NNKmdhdodq~Qzgp~)>NN_QC[>ziqznM~i}~mdib>jio~so-?)kmjojotk~)r~{fdoB~oDhzb~?zozC?[>gd|f?zoz[>gjn~@q~io)kmjojotk~)dido>gjn~@q~io[>jhkji~ion)dio~maz|~n)D>jh~oHzmfn@so~indji[?~qd|~Jmd~iozodji@q~io[Api|odji)kmjojotk~){di}[B~oK~maO~non[COHG?j|ph~io)kmjojotk~)|m~zo~Ojp|cGdno[COHGAjmh@g~h~io)kmjojotk~)m~lp~no<poj|jhkg~o~[COHGAmzh~N~o@g~h~io)kmjojotk~)cznKjdio~m>zkopm~[COHGAmzh~N~o@g~h~io)kmjojotk~)r~{fdoM~lp~noApggN|m~~i[Diog[HOO_RFN~oO~soNdu~Di}~s[H~}dz>jiomjgg~m[H~}dz@i|mtko~}@q~io[Ijodad|zodji[J{e~|o)kmjojotk~)__}~adi~N~oo~m__[J{e~|o)n~zg[J{e~|o)n~oKmjojotk~Ja[Jaan|m~~i>ziqznM~i}~mdib>jio~so-?[Kzoc-?)kmjojotk~)z}}Kzoc[Kzth~ioM~nkjin~[K~majmhzi|~KzdioOdhdib[Km~n~iozodji>jii~|odji>gjn~@q~io[M~z}~mHj}~<mod|g~Kzb~[NQBBmzkcd|n@g~h~io)kmjojotk~)hjuM~lp~noKjdio~mGj|f[NQBKzoo~mi@g~h~io)NQB_PIDO_OTK@_J=E@>O=JPI?DIB=JS[N|m~~iJmd~iozodji[NjbjpGjbdiPodgn[Njpm|~=paa~m[Njpm|~=paa~m)kmjojotk~)|czib~Otk~[Nk~~|cNtioc~ndnPoo~mzi|~[O~soOmz|fGdno)kmjojotk~)b~oOmz|f=tD}[P>R~{@so[R~{FdoAgzbn[_RSEN[__$_ldcjj.1+_$__[__adm~ajs__[__fnz{>nn>jpio[__jk~mz[__njbjp_n~|pm~_dikpo[_}jp{g~,,_[|cmjh~[|cmjh~)zkk)DinozggNozo~[|cmjh~)|nd[|jinjg~[}~azpgoNozopn[}j|ph~io){j}t)jihjpn~~io~m[}j|ph~io){j}t)jikzb~[}j|ph~io){j}t)notg~){z|fbmjpi}=g~i}Hj}~[}j|ph~io){j}t)notg~)gdi~=m~zf[}j|ph~io){j}t)notg~)hdiRd}oc[}j|ph~io){j}t)notg~)hnO~soNdu~<}epno[}j|ph~io){j}t)notg~)o~so<gdbiGzno[}j|ph~io){j}t)s(hn(z||~g~mzojmf~t[}j|ph~io)}~azpgo>czmn~o[}j|ph~io)}j|ph~io@g~h~io)jim~ndu~[}j|ph~io)adg~>m~zo~}?zo~[}j|ph~io)hn>zknGj|fRzmidibJaa[}j|ph~io)jihjpn~hjq~[}j|ph~io)jin~g~|odji|czib~[}j|ph~io)n|mjggdib@g~h~io)notg~)ajioQzmdzioIph~md|[}j|ph~io)n~g~|odji[}j|ph~io)n~g~|odji)otk~?~ozdg[~so~mizg[~so~mizg)<}}Azqjmdo~[~so~mizg)DnN~zm|cKmjqd}~mDinozgg~}[agtagjr_rzggkzk~m_en[b~oHzo|c~}>NNMpg~n[bm~~io~z[dnIj}~Rcdo~nkz|~[e~ndji[ji~mmjm[jih~nnzb~[jijk~mz}~oz|c~}qd~r|czib~[jk~i?zoz{zn~[kznnrjm}_hzizb~m_~iz{g~}[k~majmhzi|~[ncjrHj}zg?dzgjb[ozj{mjrn~m_@q~io[r~zoc~m=md}b~[r~{fdo<p}dj>jio~so)kmjojotk~)|gjn~[r~{fdoM~lp~noAdg~Ntno~h`oyvo_nuuqkjHsub)tosgzout;zgxz<oskHsub1tjk~kj,*Hsub:kw{kyz)tosgzout.xgsk`Hnshg-)SHGCOOK).)+`b~oNjpm|~n`kjno`hjpn~Pk`q9i3sf,mpp,svq:sspF9sksy3wi`Adg~M~z}~m`hnDi}~s~}?=`h~ocj}`m~z}rmdo~`{q}z|lcp}l`kzmn~`o5ub)vvkgxgtik`$_qEOk`gdi~ij`}zoz5`|czmn~o`mb{zW-/+[,,+[0.[+)/X`Iph{~m`?~qd|~Hjodji@q~io`hjpn~pk`Kg~zn~ ~iz{g~ |jjfd~ di tjpm {mjrn~m {~ajm~ tjp |jiodip~)`hjpn~}jri`rdi}jrn(,-0-`n~nndjiNojmzb~`cus~~DzsbhcaT_dzsbhca`jid|~|zi}d}zo~`|jio~io`hdh~Otk~n`JK@I`pid|j}~`ipgg`GJR_AGJ<O`iy{h6uppqz`hBu|pxfner5ynbuQBu|pxfner5ynbu`++++`k~majmhzi|~`|gd~ioS`pn~Kmjbmzh`{~oz`ojp|chjq~`n<vnv|`c__ahh7fwshw:fsawTahh7iaghca>G`adggNotg~`|~ggpgzm`jigjz}`di|gp}~`gdifKmjbmzh`?~qd|~Jmd~iozodji@q~io`kzmn~Dio`e{n|c~h~5**lp~p~_czn_h~nnzb~`oj?zozPMG`N@I?`~n|zk~`z}}=~czqdjm`z||~g~mzodji`|zgg{z|f`ynik}t@0a{h.h{uan YD Ukjpnkh`NO<OD>_?M<R`Hnshg-)SHGCOOK)1)+`6 ~skdm~n8`|gjn~`b~oNpkkjmo~}@so~indjin`~sk~mdh~iozg(r~{bg`b~o<ggM~nkjin~C~z}~mn`#a3-`adggM~|o`jk~i?zoz{zn~`h~oz`~qzg`$_TROP`txfcesjwfsDfwbmvbuf`7@H=@? d}8`6 N~|pm~`hjpn~Hjq~`ojPkk~m>zn~`WV+(4]v,[.xW\\\\)V+(4]v,[.xXv.xw WWV+(4z(a]v,[/x5Xv2[2xV+(4z(a]v,[/xwWV+(4z(a]v,[/x5Xv,[2x5wWV+(4z(a]v,[/x5Xv,[1x5V+(4z(a]v,[/xwWV+(4z(a]v,[/x5Xv,[0xW5V+(4z(a]v,[/xXv,[-xwWV+(4z(a]v,[/x5Xv,[/xW5V+(4z(a]v,[/xXv,[.xwWV+(4z(a]v,[/x5Xv,[.xW5V+(4z(a]v,[/xXv,[/xwWV+(4z(a]v,[/x5Xv,[-xW5V+(4z(a]v,[/xXv,[0xwV+(4z(a]v,[/x5WW5V+(4z(a]v,[/xXv,[1xXw5WW5V+(4z(a]v,[/xXv,[2xw5Xw55WaaaaW5+v,[/xXv+[,x5Xv+[,xWW-0V+(0]wW-V+(/]w,v+[,xV+(4]Xv+[,xV+(4]X\\\\)Xv.[.xW-0V+(0]wW-V+(/]w,v+[,xV+(4]Xv+[,xV+(4]XwWV+(4z(a]v,[/x5Xv,[/x5WW-0V+(0]wW-V+(/]w,v+[,xV+(4]Xv+[,xV+(4]X\\\\)Xv.[.xW-0V+(0]wW-V+(/]w,v+[,xV+(4]Xv+[,xV+(4]XX X`|m~zo~Jaa~m`pi~n|zk~`i@qmx>xmgq~P@qmx>xmgq~JbyK /obudqF 1{zb~{x JUTOnubK`vVbqn1Y[C1Y[`v~ookhb~shnmDwBrgnbjv~udBek~rg`{zn~`}dnkzo|c@q~io`n~oM~lp~noC~z}~m`u__driver_evaluateB__webdriver_evaluateB__selenium_evaluateB__fxdriver_evaluateB__driver_unwrappedB__webdriver_unwrappedB__selenium_unwrappedB__fxdriver_unwrappedB__webdriver_script_funcB__webdriver_script_fn`jaan~oRd}oc`?JHKzmn~m`O@HKJM<MT`adg~izh~`zoomQ~mo~s`Diadidot`gzibpzb~n`m~nkjin~=j}t`~s~|`z||~g~mzodjiDi|gp}dibBmzqdot`,3ks \\\'<mdzg\\\'`<}}@q~ioGdno~i~m`U3SCEET){hA+zSUgMhgQtPCEWX`km~|dndji h~}dphk agjzo6qzmtdib q~|- qzmtdiO~s>jjm}dizo~6qjd} hzdiWX vbg_Amzb>jgjm8q~|/WqzmtdiO~s>jjm}dizo~[+[,X6x`Hnshg-)N~mq~mSHGCOOK`\\\\\\\\`np{nomdib`b~oM~nkjin~C~z}~m`ojGjr~m>zn~`|gd~ioT`r~{bg`qzgp~`~iph~mzo~?~qd|~n`pidajmhJaan~o`hjpn~jq~m`6 kzoc8*`n|m~~iS`hjpn~hjq~`api|`|m~zo~Kmjbmzh`pn~ nomd|o`rdad`{gp~ojjoc`j{e~|o`GJR_DIO`cznc`do~hNdu~`n~oDo~h`b__lxuwg|kxg_xktajtix`b~oPidajmhGj|zodji`bwg|kxgVxktajtix`z|jn`M~hjq~@q~ioGdno~i~m`r~{fdoDi}~s~}?=`${hA+zSUgMhgQtPCE`nzq~`hn>mtkoj`KJNO`rdhzs` cjno `}~oz|c@q~io`zmdot`Hd|mjnjao)SHGCOOK),)+`bwg|kxg`n|m~~i`b~o<oomd{Gj|zodji`omdh`mzib~Hdi`K~majmhzi|~J{n~mq~m@iomtGdno`wfn_gbclrgdgcp`|zi}d}zo~`Hnshg)SHGCOOK`cG}mdwV8whwuh{cb`b~oKzmzh~o~m`|czmbdibOdh~`n__mpylmva__I_mpylmva_;lhkly6vkl`xtb}hfqsfpf}fifqv~e|kdb`hjpn~Jpo`Kjdio~m@q~io`Hnshg-)N~mq~mSHGCOOK)/)+`n~oN~mq~m?zoz`Jq~mmd}~Hdh~Otk~`Hnshg-)N~mq~mSHGCOOK).)+`hjpn~?jri`}~n|mdkodji`spgvurctmgtD__puD__puYrrgpf8gzvDgq;gdZtqyugt`z8|zi}d}zo~5`prta{nxngnqny~hmfslj`zi}mjd}`m~nkjin~SHG`x__tb}aofsbo_p~ofmq_ck`h~}dz?~qd|~n`w^\\\\$;}Ax]ba_`ncjrHj}zg?dzgjb`zoomd{po~ q~|- zoomQ~mo~s6qzmtdib q~|- qzmtdiO~s>jjm}dizo~6pidajmh q~|- pidajmhJaan~o6qjd} hzdiWXvqzmtdiO~s>jjm}dizo~8zoomQ~mo~sZpidajmhJaan~o6bg_Kjndodji8q~|/WzoomQ~mo~s[+[,X6x`n|mjgg`~oc~mi~o`$_a{`r~{fdoM~lp~noAdg~Ntno~h`\\x00`dvkzg9h}}ftevva`|m~}~iodzgn`l :;=N`Vj{e~|o <mmzt]`Wi~zm \\\'))) ipggV+])))\\\'X`H~}dzNom~zhOmz|f`~mmjm`mjrn`f~t?jri`cook5**`|cdg}m~i`u59YtlD59Ytl`h~nnzb~` nmags `Jk~i`*5pn~m_ajion`a__whMyvV__{9hMyv`ajio`jmd~iozodji`H@?DPH_DIO`Api|odji`CDBC_DIO`pigjz}`}~qd|~D}`z|odji`COHG<i|cjm@g~h~io`gb{}qhRBsoz@zoisb 7V 3}|db}zRU`>jpio`useleniumCevaluate`bzhhz`AM<BH@IO_NC<?@M`{yjjM{yh=fc{eZyjjM{yh@i{omIonZyjjM{yhE}s>iqhZyjjM{yhE}sOj`B~oJmdbdizgPmg`q}Ah`m~nkjin~`|m~zo~J{e~|oNojm~`jaan~oPidajmh`ojBHONomdib`b~oOdh~uji~Jaan~o`${_kgzoajmh`:>N8`f~tPk`|zkopm~Noz|fOmz|~`pi}~adi~}`~iz{g~}Kgpbdi`kzm~ioIj}~`N~i}`c~dbco`U3SCe`gznoDi}~sJa`Hnshg-)N~mq~mSHGCOOK)1)+`ezqzn|mdko5`hju>jii~|odji`}{g|gd|f`Hjpn~`b~o@so~indji`gG=@zoisbR?3H`M~b@sk`hjuMO>K~~m>jii~|odji`B~oQzmdz{g~`zooz|cNcz}~m`LOK_@K@_CJJF`N@G@>O qzgp~ AMJH @f|K_o RC@M@ izh~8:`}dnkgzt`r~{fdoK~mndno~ioNojmzb~`zg~mo`AGJ<O`lm|fgh?j@socREdC<k,nQTFP.MAHLr3DBaKJ4-{qGIe(2uS=zNip+O>1bt_/U~0}y!;$%^&YWXZ879):*56vxV]w `B~oI~soM~lD?`noz|f`t)bwf,dpo-bwb,oufsgbdfCkftjpo`ENJI`$_on`n~oOdh~`<MM<T_=PAA@M`u2Z(D2dfYtrl`kgpbdin`b~oN~mq~m?zozDi>jjfd~`kjndodji`ajioAzhdgt`damzh~`|jgjm?~koc`zooz|c@q~io`m~opmi zV{]W`{_M}f}hcog_C>?_L}{il|}lZ_m}f}hcogZ{yffM}f}hcog`n~oGj|zg?~n|mdkodji`xpbibkfrj`j{e~|oNojm~Izh~n`oc~i`l/1;qnuan}rljZ?rkn}jw 8jlqrwn @wrZ.xxusjeeZAn{mjwjZ3nuan}rlj 9n~n 7? ;{x RT ?qrwZ}jqxvjZ72 >vj{}_3 }n|} =np~uj{Z/49;{xLurpq}Z3nuan}rlj 7? SR 7rpq} 0c}nwmnmZ3nuan8_4wmrjZ>0.=xkx}x7rpq} -xumZ:= 8xqjw}d @wrlxmn =np~uj{Z/{xrm >jw| ?qjrZ6jwwjmj >jwpjv 89Z//. @lqnwZluxltQOPU_aPMPZ>jv|~wp6jwwjmj=np~uj{Z84 7,9?492 -xumZ>jv|~wp>jw|9~vR7 7rpq}Zan{mjwjZ3nuan}rlj9n~n?qrwZ>0.1juukjltZ>jv|~wp0vxsrZ?nu~p~ >jwpjv 89Z.j{{xr| 2x}qrl >.Z1udvn 7rpq} =xkx}x 7rpq}Z>x8,L/rpr} 7rpq}Z>x8. >jw| =np~uj{Z3DCrD~jw5Z||}Z|jv|~wpL|jw|Lw~vS?Zpv_vnwpvnwpZ7xqr} 6jwwjmjZ}rvn| wnb {xvjwZ|jv|~wpL|jw|Lw~vS7Z|n{roLvxwx|yjlnZ>jv|~wp>jw|9~vLR? ?qrwZ.xux{:>@4LC?qrwZ/{xrm 9j|tq >qro} ,u}Z>jv|~wp?nu~p~=np~uj{Z-nwpjur :?>Z84 7jw?rwp_2- :~}|rmn D>Z1E8rjxB~_2-PWOROZqnuanLwn~nL{np~uj{Z>>? 8nmr~vZ.x~{rn{ 9nbZ6qvn{ 8xwm~utr{r -xumZ3nuan}rlj 7? QR @u}{j 7rpq} 0c}nwmnmZ3nuan}rlj 7? QT @u}{j 7rpq}Z=xkx}x 8nmr~vZ/{xrm >jw| -xumZpx~mdZ|jw|L|n{roLlxwmnw|nmLurpq}Z>1rwmn{Zwx}xL|jw|LlstLvnmr~vZvr~rZ8=xltd ;=. -xumZ,wm{xrm.uxlt =np~uj{Z>jv|~wp>jw|9~vLS7 7rpq}Z|jw|L|n{roL}qrwZ,j;jwpDjn{Zlj|~juZ-9 8xqjw}d:? -xumZcL||}Z9x}x>jw|8djwvj{EjbpdrZ3nuan}rlj 7? RR ?qrw 0c}nwmnmZ,|qund>l{ry}8? ,u}Z9x}x >jw| /najwjpj{r @4Z=xkx}x .xwmnw|nm -xumZ=xkx}x 8nmr~v 4}jurlZvr~rncZ9x}x >jw| 2~{v~tqr @4Z>>? Arn}wjvn|n 7rpq}Z72_:{rdjZqdlxoonnZcL||}L~u}{jurpq}Z/13nr,BVL,Z1EEBC-?:?_@wrlxmnZ/najwjpj{r >jwpjv 89 -xumZ|jw|L|n{roLvxwx|yjlnZ;jmj~t -xxt -xumZ72L1EDrwp-r6jr>q~L>PTLAQMQZ72L1EDrwp-r6jr>q~L>PTLAQMRZ3nuan}rlj9n~n7? ;{x RT ?qZ8rl{x|xo} 3rvjujdjZ>jv|~wp>jw|1juukjltZ>>? 8nmr~v 4}jurlZ,wm{xrm0vxsrZ>jv|~wp>jw|9~vLR=Z4?. >}xwn >n{roZ|jw|L|n{roL|vjuuljy|ZcL||}Lvnmr~vZ72_>rwqjun|nZ=xkx}x ?qrw 4}jurlZlnw}~{dLpx}qrlZ.uxltxyrjZ7~vrwx~|_>jw|Z1ux{rmrjw >l{ry} ,u}Z9x}x >jw| 2~{v~tqr -xumZ7?3D>E6 -xumZ2>_?qjrZ>jv|~wp9nx9~v_R?_QZ,{jkrlZqjw|L|jw|Lwx{vjuZ7xqr} ?nu~p~Z3D<r3nrLTO> 7rpq}Z7rwm|nd ox{ >jv|~wpZ,= .{d|}juqnr /-Z>jv|~wp >jw| 8nmr~vZ|jv|~wpL|jw|Lw~vSTZqjw|L|jw|LkxumZ7~vrwx~|_>l{ry}Z>>? .xwmnw|nmZ>jv|~wp/najwjpj{r=np~uj{Z,wsju 8jujdjujv 89Z>jv|~wp?qjrG}n|}HZ1E7jw?rwp3nrL8L2-PWOROZ3nk{nb :?>Z2>ST_,{jkG,wm{xrm:>HZ>jv|~wp >jw| 7rpq}Z.qxlx lxxtdZqnuanLwn~nL}qrwZ;9 8xqjw}d:? 8nmr~vZ72L1E6j?xwpL8PXLAQMSZ/{xrm >n{roZ>jv|~wp>rwqjuj=np~uj{Zqnuan}rljZ72L1E6j?xwpL8PXLAQMQZ9x}x >jw| /najwjpj{r @4 -xumZ>>? 7rpq}Z/1;0vxsrZbnj}qn{oxw}wnb =np~uj{Z=xkx}x9~vR=Z/49;{xLvnmr~vZ>jv|~wp >jw| 9~vTTZ>>? 3njad 4}jurlZ72uxltS =np~uj{_OWOTZ2nx{prjZwx}xL|jw|LlstZ?nu~p~ >jwpjv 89 -xumZ84@4 0C 9x{vjuZ3D<r3nrLVT> -xumZ9x}x>jw|8djwvj{Ejbpdr -xumZd~wx|y{xLkujltZqnuanLwn~nLwx{vjuZ7~vrwx~|_>n{roZ?8 8xqjw}d:? 9x{vjuZ>jv|~wp>jw|9~vLR7a 7rpq}Z>jv|~wp >jw| 9~vSTZ>vj{}2x}qrl 8nmr~vZpnx{prjZlj|~juLoxw}L}dynZ>jv|~wp >jw| -xumZ|vjuuLljyr}ju|Z81rwjwln ;=. -xumZ1E7jw?rwp3nr_2-PWOROZ>jv|~wp,{vnwrjwZ=xkx}x -xumZlnw}~{dLpx}qrlLkxumZcL||}LqnjadZ>>? 7rpq} 4}jurlZ?qj{7xwZcL||}Lurpq}Z/rwkxu =np~uj{Z>jv|~wp-nwpjur=np~uj{Z69 8xqjw}d:?>vjuu 8nmr~vZqdy~{nZ>jv|~wp?jvru=np~uj{Z8jujdjujv >jwpjv 89Z9x}x >jw| 6jwwjmj @4ZqnuanLwn~nZ3nuan}rlj 7? TT =xvjwZ9x}x >jw| 6jwwjmj -xumZ>jwydjZ>jv|~wp;~wsjkr=np~uj{Z|jv|~wpL|jw|Lw~vS7aZ72_6jwwjmjZ>jv|~wp >jw| =np~uj{ZEjbpdrL:wnZ/{xrm >n{ro -xum 4}jurlZ1E6,?5BZlx~{rn{ wnbZ>jv|~wp0vxsr=np~uj{Z84@4 0C -xumZ,wm{xrm 0vxsrZ9x}x 9j|tq ,{jkrl @4Z7./ .xvZ1~}~{j 8nmr~v -?ZAraxLnc}{jl}Z-jwpuj >jwpjv 89 -xumZqjw|L|jw|L{np~uj{Z>9~vLR=Z>9~vLR?Zqjw|L|jw|Z>>? @u}{j 7rpq}Z=xkx}x =np~uj{Z=xkx}x 7rpq}Z3jw~vjwZwnbuppx}qrlZ/13nr,BTL,Zqjw|L|jw|Lurpq}Z;uj}n 2x}qrlZ>9~vLR7Z3nuan}rlj 7? ST 7rpq}Z8djwvj{ >jwpjv Ejbpdr -xumZupL|jw|L|n{roLurpq}Z84@4 0C 7rpq}Z=xkx}x ?qrwZ>x8, -xumZ;jmj~tZ>jv|~wp >jw|Z>yjlrx~|_>vjuu.jyZ|jw|L|n{roZ/A 8xqjw}d:? 8nmr~vZ>}jkun_>ujyZvxwjlxZ1udvnL7rpq}Zoeed|Lmx|ydZ>l{nnw>jw|ZluxltQOPUZ=xkx}x .xwmnw|nm -xum 4}jurlZ,{rjuZ69 8xqjw}d 8nmr~vZ8x}xdj78j{~ BR vxwxZ3jwm|n} .xwmnw|nmZ=xkx}x 4}jurlZ3?. 3jwmZ>>? @u}{j 7rpq} 4}jurlZ>>? Arn}wjvn|n =xvjwZ9x}x 9j|tq ,{jkrl @4 -xumZlqwoecqLvnmr~vZ>9~v.xwmLR?Zlnw}~{dLpx}qrlL{np~uj{Zmnoj~u}_{xkx}xLurpq}Z9x}x >jw| 8djwvj{Z8djwvj{ >jwpjv 89Z,yyun .xux{ 0vxsrZbnj}qn{oxw}=npZ>jv|~wp8jujdjujv=np~uj{Zj{rjuZ/{xrm >n{ro -xumZ.;xR ;=. -xumZ84 7,9?492Z>jv|~wp6x{njwL=np~uj{Z}n|}ST =np~uj{Z|yr{r}_}rvnZ/najwjpj{r >jwpjv 89Z>l{nnw>n{roZ=xkx}xZl~{|ranLoxw}L}dynZ>?3nr}r_araxZlqwoecqZ>jv|~wp .uxlt1xw} R,Z=xkx}x .xwmnw|nm =np~uj{Z|jv|~wpLwnxLw~vR=Z25 8xqjw}d:? 8nmr~vZ.q~uqx 9n~n 7xltZ{xkx}xLw~vR7ZqnuanLwn~nL~u}{j7rpq}nc}nwmnmZ>jv|~wp:{rdj=np~uj{Z>jv|~wp>jw|9~vLS7a 7rpq}Z8Drwp3nr_PWORO_.QL-xumZ/1;>qjx9aBTL2-Z=xkx}x -ujltZqnuanLwn~nL~u}{jurpq}Zpv_crqnrZ72uxltS 7rpq}_OWOTZ2~sj{j}r >jwpjv 89Z8jujdjujv >jwpjv 89 -xumZ{xkx}xLw~vR=Z>?Crqnr_araxZ1EEq~wD~jw_2-PWOROZwx}xL|jw|LlstLurpq}Zlxux{x|Z9x}x >jw| 2~{v~tqrZ9x}x >jw| >dvkxu|Z=xkx}x 7rpq} 4}jurlZ7xqr} ?jvruZl~{|ranZmnoj~u}_{xkx}xZ-qj|qr}j.xvyunc>jw| -xumZ72_9~vkn{_=xkx}x ?qrwZvxwx|yjlnmLbr}qx~}L|n{ro|Z3nuan}rlj 7? RT ?qrwZ|jv|~wpL|jw|Lw~vR7AZ/49;{xZ5xvxuqj{rZ|jw|L|n{roLurpq}ZqnuanLwn~nLkujltZ7xqr} -nwpjurZ8djwvj{ >jwpjv EjbpdrZ/{xrm >n{ro 4}jurlZ=xkx}x -xum 4}jurlZ9jw~v2x}qrlZ>xwd 8xkrun @/ 2x}qrl =np~uj{Z2nx{prj -xum 4}jurlZ|jv|~wpL|jw|Lw~vR7aZd~wx|L}qrwZ|jv|~wpLwnxLw~vR?LlxwmZ9x}x >jw| 8djwvj{ @4 -xumZup|n{roZ1EDx~3nrL=L2-PWOROZ7xqr} ;~wsjkrZkj|tn{aruunZ|jv|~wpL|jw|Lw~vS?aZ|jv|~wpL|jw|L}qrwZ72 0vxsrZ,wsjur9nb7ryrZ>jv|~wp>jw|9~vLS? ?qrwZ>jv|~wp6x{njwL-xumZvr~rncLurpq}Z9x}x >jw| 6jwwjmjZ=xkx}x 9x{vju 4}jurlZ2nx{prj 4}jurlZ|jw|L|n{roLvnmr~vZ>vj{} EjbpdrZ=xkx}x .xwmnw|nm 4}jurlZ9x}x >jw| 6jwwjmj @4 -xumZ/1; >l >jw| 3n~nRO_PORZ72_9~vkn{_=xkx}x -xumZ;jmj~t -xxtZcL||}Llxwmnw|nmZ>~w|qrwnL@lqnwZ=xkx}x -ujlt 4}jurlZ=rwpx .xux{ 0vxsrZ/najwjpj{r :?>Z>vj{} Ejbpdr ;{xZ1E7jw?rwp3nrL8L2-6Z,wm{xrm.uxltL7j{pn =np~uj{Zy{xyx{}rxwjuudL|yjlnmLbr}qx~}L|n{ro|Z.~}ran 8xwxZ}rvn|Z72 >vj{}_3 }n|} -xumZ/49;{xL7rpq}Z|jw|L|n{roLkujltZ7xqr} /najwjpj{rZy{xyx{}rxwjuudL|yjlnmLbr}qL|n{ro|Z|jv|~wpL|jw|Lw~vR7Z8Dx~wp ;=. 8nmr~vZ/12x}qrl;BTL-42T36L>:9DZqjw|L|jw|Lvnmr~vZ>>? 3njadZ72L1EEq~wD~jwL8OQLAQMQZ8djwvj{@9nb =np~uj{Z9x}x 9j|tq ,{jkrl -xumZ>jv|~wp2~sj{j}qr=np~uj{Zojw}j|dZqnuanLwn~nLurpq}Z3nuan}rlj 9n~n :?> -xumZwx}xL|jw|LlstLkxumZ|jv|~wpL|jw|Lw~vR=Z7rwm|nd >jv|~wpZ|jv|~wpL|jw|Lw~vR?Z>l{nnw>n{ro8xwxZ0?{~vy 8djwvj{_EBZqnuanLwn~nL}qrwnc}nwmnmZ9x}x 9j|tq ,{jkrlZ72_2~sj{j}rZ>vj{}_8xwx|yjlnmZ?jvru >jwpjv 89Z72 0vxsr 9xw,80Z=xkx}x .xwmnw|nm 7rpq} 4}jurlZpv_srwptjrZ1E7jw?rwp6jw3nr_2-PWOROZup}{januZyjuj}rwxZ2nx{prj -xumZ/{xrm >jw|Z72_;~wsjkrZ>vj{}2x}qrl -xumZ>jv|~wp >jw| ?qrwZ>>? .xwmnw|nm -xumZ.xvrl|_9j{{xbZlx~{rn{Z:{rdj >jwpjv 89ZqnuanLwn~nLurpq}nc}nwmnmZ1E7jw?rwp3nrL=L2-PWOROZ,= .{d|}juqnr36>.> /-Z|n{roZ=?B>D~n=x~m2x2OaPL=np~uj{Z8rjxB~_y{naZ1EDP6Z72_9~vkn{_=xkx}x =np~uj{Z,wm{xrm.uxltZ>x8, =np~uj{Z3D<r3nrLSO> 7rpq}cZupL|jw|L|n{roZ/jwlrwp >l{ry} -xumZmnoj~u}Z|nlL{xkx}xLurpq}Z.xux{:>@4L=np~uj{Z}n|} =np~uj{Z?jvru >jwpjv 89 -xumZ1EDrwp-rCrwp>q~L>PUZ=xkx}x9~vR7 7rpq}Zvxwx|yjlnmLbr}qL|n{ro|Z|jv|~wpL|jw|Lw~vRTZ.xxu sjeeZ>jv|~wp9nx9~vLR7Z>?CrwptjrZ>l{nnw>jw|8xwxZ/1;BjBjBTL2-Z>jv|~wp>jw|9~vLR7 7rpq}Z-jwpuj >jwpjv 89Z2~{v~tqr >jwpjv 89Z>0.=xkx}x7rpq}Zqdoxwc{jrwZ8Drwp3nr2-PWORO.L-xumZ|jv|~wpL|jw|Lurpq}Z3nuan}rlj 7? UT 8nmr~vZ/{xrm >jw| 1juukjltZ=xkx}x ?n|}P -xumZ9x}x >jw| 8djwvj{ -xumZ|jw|L|n{roLlxwmnw|nmLl~|}xvZ>jv|~wp9nx9~vLR?Z>jv|~wp >jw| 9~vRTZvxwx|yjlnZ?7 8xqjw}d 8nmr~vZqnuanLwn~nLvnmr~vZ7?3D>E6Z=xkx}x .xwmnw|nm l~|}xvn -xumZ8djwvj{RZ/{xrm >jw| /najwjpj{rZ>qjx9a_y{naZ|jv|~wpLwnxLw~vR7Z1E7jw?rwp3nrL07L2-6Zd~wx|Z|jv|~wpLwnxLw~vR?Z?rvn| 9nb =xvjwZqnuanLwn~nLkxumZwx}xL|jw|LlstL{np~uj{Z9x}x >jw| 2~{v~tqr @4 -xumZ/49;{xLkujltZ1E7jw?rwp3nrL07L2-PWOROZ>>? Arn}wjvn|n 8nmr~vZ=xkx}x .xwmnw|nm 7rpq}Z>>? Arn}wjvn|n -xumZ,= /5L66Z/{xrm >jw| >08.Z9x}x >jw| 8djwvj{ @4Z.xvrwp >xxwZ8D~yyd ;=. 8nmr~vZ=x|nvj{dZ7xqr} 2~sj{j}rZ=xkx}x .xwmnw|nm l~|}xv -xumZ1E7jw?rwp3nr>L=L2-Z3nuan}rlj 9n~n :?>Z6jr}r_y{naZ=xkx}xL-rp.uxltZ1ED-6>5BZ3jwm|n} .xwmnw|nm -xumZ>jv|~wp2nx{prjwZ/jwlrwp >l{ry}Z|jw|L|n{roLlxwmnw|nmZqjw|L|jw|L}qrwZ>jv|~wp>jw|9~vLS?a ?qrwZ7xqr} :mrjZ-qj|qr}j.xvyunc>jw|`z{jmo`g~iboc`|jii~|odji`jq~mmd}~Hdh~Otk~`\\\'ipgg\\\' dn ijo zi j{e~|o`do~h`<{jmo`np{nom`~qzgpzo~`omzina~m>czii~g`f~tpk`{paa~m?zoz`Hnshg-)N~mq~mSHGCOOK)0)+`~s~|N|mdko`ncz}~mNjpm|~`#,2~`z{njgpo~`N~oM~lp~noC~z}~m`|gd|f`o~so=zn~gdi~`jaan~oC~dbco`7nkzi notg~8\"ajio(azhdgt5hhggdd6ajio(ndu~5,,/ks\"9hhhhhhhhhhhggddd7*nkzi9`ojAds~}`kds~g?~koc`jaan~oT`Vipgg] dn ijo zi j{e~|o`gj|zg?~n|mdkodji`b~o=zoo~mt`n~ga`7!((Vda bo D@ `|{heiabgY{heiabgbg}hY{heiabgf|mx`r~{fdo>jii~|odji`t$ippl$C$$mphhfsC$$mtqC$$mtscC$iey$C$sfbezZpefXmsfbez(yfdvufe,o7ijt)sbnfC$tey$C$vjf$`q$6vi;)(vs{wiv)pewwmgF;)(vs{wiv3iwweki)irxiv`|U}ngzmbhgUV toxk x 6 g|p =xm|UV4 {|yn~~|k4 k|mnkg g|p =xm|UV Z x 7 *))4vUVV`q~mo~sKjn<oomd{`Q@MO@S_NC<?@M`~iz{g~Q~mo~s<oomd{<mmzt`<}}N~zm|cKmjqd}~m`g~q~g`|jiozdin`{zoo~mt`${_n~opk`nozopnO~so`~s~|po~Nlg`Agjzo.-<mmzt`cook`m~hjq~Do~h`a~o|c`kw}bs}slsvs~emrkxqo`bgj{zgNojmzb~`Hnshg.)SHGCOOK`omtvm~opmi __}dmizh~6x|zo|cW~Xvx`v             \\\"d|~N~mq~mn\\\" 5 V                 v\"pmg\" 5 \"nopi5nopi+,)ndkkcji~)|jh\"x[ v\"pmg\" 5 \"nopi5nopi)~fdbz)i~o\"x[                 v\"pmg\" 5 \"nopi5nopi)ar}i~o)i~o\"x[ v\"pmg\" 5 \"nopi5nopi)d}~zndk)|jh\"x[                 v\"pmg\" 5 \"nopi5nopi)dko~g)jmb\"x[ v\"pmg\" 5 \"nopi5nopi)mdso~g~|jh)n~\"x[                 v\"pmg\" 5 \"nopi5nopi)n|cgpi})}~\"x[ v\"pmg\" 5 \"nopi5nopi)g)bjjbg~)|jh5,4.+-\"x[                 v\"pmg\" 5 \"nopi5nopi,)g)bjjbg~)|jh5,4.+-\"x[ v\"pmg\" 5 \"nopi5nopi-)g)bjjbg~)|jh5,4.+-\"x[                 v\"pmg\" 5 \"nopi5nopi.)g)bjjbg~)|jh5,4.+-\"x[ v\"pmg\" 5 \"nopi5nopi/)g)bjjbg~)|jh5,4.+-\"x             ]         x`mzib~Hzs`__#|gznnOtk~`H@?DPH_AGJ<O`hpnpur_`j{e~|oNojm~`${_a~o|cLp~p~`.e~<G~Nnz1`b~oDo~h`${_jiIzodq~M~nkjin~`kpncIjodad|zodji`<izgtn~mIj}~`|czmz|o~mN~o`|m~zo~?zoz>czii~g`iphDo~hn`{jjg~zi`ojp|cnozmo`omtvm~opmi Wrdi}jr dinozi|~ja Rdi}jrX6x|zo|cW~Xvx`dnIzI`ajmh`v\"jkodjizg\" 5 V v\"Mok?zoz>czii~gn\" 5 omp~x ]x`zkkgd|zodji>z|c~`yScUkjpnkh@ScUkjpnkh`phfuyhmf9jkwjxmGhfuyhmf_wjkwjxmGhmjhp3tlnsGijhw~uy*fqqgfhp`fhtqzxe9xsst}`mpiodh~`o~non`hjpn~jpo`MO>K~~m>jii~|odji`LL=mjrn~m`cookn5**`b~oNcz}~mKm~|dndjiAjmhzo`q~mo~s<oomd{Kjdio~m`@iodot`}mzr<mmztn`adggO~so`HNKjdio~m@q~io`~s|~ko`~so~mizg`omtvm~opmi __adg~izh~6x|zo|cW~Xvx`udeviceorientation`$_|f`qgzp~`jizpoj|jhkg~o~`pidajmh-a`|jhkdg~Ncz}~m`|jhkg~o~`hjuDi}~s~}?=`mzi}jh`zi|cjm`pmgW#}~azpgo#pn~m}zozX`{~czqdjm\');var ÿ.length/4,ÿ](arguments[0],arguments[1]);case 3:return ÿ.length/4;for(ÿ[20];}else{}var ÿ[358])+ÿ[490]]){ÿ(false);ÿ[456]],ÿ[6]||ÿ=true;}}return ÿ[492]]=ÿ[63]]))){ÿ=\"1\"==ÿ,\'=\');ÿ()*ÿ[428]];if( !ÿ[76]];var ÿ[201]],ÿ&0x80)!==0)ÿ,3,16);ÿ[17]=ÿ[35]);ÿ[17];ÿ-30;}ÿ+=4;}else if(ÿ[268]),ÿ];}catch(ÿ+=\'&\';else ÿ){try{if( typeof ÿ,2000);ÿ<=50){ÿ[151]]=ÿ[513]]){}else if(ÿ.length);return ÿ[515]](\"\");ÿ[479])))ÿ[485]],ÿ[39]]);ÿ=1;}}for(ÿ];}for(ÿtry{if( !(ÿ];for(ÿ[214];}var ÿ[63]]&&/Android 4\\.[0-3].+ (GT|SM|SCH)-/[ÿ++ ;}}return ÿ>>6)];ÿ))return ÿ(30));var ÿ[524]),ÿreturn[0,0];ÿ&0xFF00)>>8),(ÿ[16]]);}ÿ[123]]);ÿ[449],ÿ(143,17);else if(ÿ[42]));if(ÿ[75]]);ÿ(61);ÿ.localStorage[ÿ*2+1]=ÿ[295]];this.y=ÿ[149]]!==ÿ();return ÿ[354]];ÿ()){this.ÿ[50]);ÿ(6);}ÿ,\'#\')){ÿ!==null&&( typeof ÿ[281]);}catch(ÿ>>2;ÿ(128))ÿ[286],ÿ(128);ÿ(6)/4;}function ÿ++ )];if(ÿ++ ;}if(ÿ<=39){ÿ[526]))in ÿ+\':\'+ÿ[365],ÿ));}return ÿ>>4)];ÿ[491]]();ÿ(252,ÿ[122]];ÿ&15)<<4;ÿ[101]]&& !ÿ=\'/\';var ÿdebugger;ÿ(28));ÿ.length/16)+1,ÿ]();ÿ[321],ÿ[224]))!= -1){ÿ,\';\')!== -1)ÿ[80]);for(ÿ[551]]:\"{}\";ÿ(29);ÿ+1]&0x3F)<<6)|(ÿ(64,ÿ-1,2);ÿ[127]]&&ÿ(4096,ÿ(4,ÿ[398]]==ÿ[439]);ÿ+1));}}function ÿ=1;}}if(( !ÿ&0x0F)<<12)|((ÿ[97]]){ÿ%64;var ÿ],16);if(ÿ+\"=\");}ÿ&255^99;ÿ[91]]));if(ÿ[206]&&ÿ[95]]){ÿ!==\'\'){if(ÿ+=38;ÿ(\'div\',\'a\',0);if(ÿ<5;ÿ=1;}ÿ>>ÿ[157]];ÿ[0]](\'?\',0);for(ÿ= -1;if(ÿ[312]]||ÿ];}else{ÿ*3/4));var ÿ+=715;ÿ[47];var ÿ[89]]=ÿ=this;try{var ÿ[54]))){return null;}ÿ();}else{for(var ÿ[379]]);ÿ[544]];}}}};function ÿ[143]]==200){}}}function ÿ(497);ÿ[427]]&&ÿ(773);ÿ+1);var ÿ=\'80\';return ÿ[536]](ÿ[14]]&&ÿ*2]=ÿ[472],ÿ[249]](0,0,100,30);ÿ[3]=(ÿ&1024)){ÿ[87]]){ÿ=0.4,ÿ&134217728)&&ÿ(5));if(ÿ[191],ÿ](arguments[0]);case 2:return ÿ<256; ++ÿ[70]](/(^\\s*)|(\\s*$)/g,\"\");if( !ÿ.length>=2){var ÿ|=1;ÿ[117])!== -1;return ÿ[3];var ÿ[304]];if(ÿ!=true)){ÿ.top==null)return ÿ));}else{ÿ[416]];var ÿ>=97&&ÿ<4*ÿ[0]=(ÿ[10]]==4){if(ÿ(145,134217728,40);ÿ[109]]=200;ÿ[15]);if( !ÿ){return false;}}ÿ-3]^ÿ[93]];var ÿ[317];ÿ[256];}return ÿ(665);ÿ*1000];ÿ[341],ÿ];}}return[false,\"\",\"\"];}function ÿ[75]];ÿ[75]]=ÿ);while(null!=(ÿ[136]](ÿ[17]].length?ÿ[0][1]){ÿ+\'=\';var ÿ[43]]);ÿ&255];if(ÿ.length-1){break;}}if(ÿ[136]]=ÿ>3){return ÿ|=32;ÿ.length;for(var ÿ)return new ÿ]>=64){this.ÿ|=256;ÿ[475]];ÿ[299];var ÿ;}break;default:break;}ÿ[48]])||ÿ[184],ÿ[260]](ÿ++ ;}}}return ÿ[84]]&&ÿ[308]](ÿ];return[ÿ=\"\";}}function ÿ&0xFF;ÿ(145,524288,ÿ[298]](),ÿ+1)/2);ÿ[96]&&(ÿ.y)/(ÿ[42]);ÿ[118],ÿ[198])){ÿ[83],ÿ[1][ÿ[1]^ÿ+1<ÿ[115]]();ÿ){return[true,ÿ=this;ÿ[376]]=ÿ&0xffffffff,ÿ],0);ÿ[435]];ÿ)[0],\'?\')[0];}else{ÿ+=1){ÿ[350]]&&ÿ[3]]);switch(ÿ[356]);ÿ=/^((?:[\\da-f]{1,4}(?::|)){0,8})(::)?((?:[\\da-f]{1,4}(?::|)){0,8})$/;ÿ[86]](\'r\')===\'m\'){ÿ[67]];var ÿ++ );}ÿ;else ÿ(706);ÿ[42])&&ÿ<=91)ÿ===\'1\'||ÿ[417]]||ÿ=32;ÿ<0xE0;ÿ[64]](0,64)));}ÿ&2048;if(ÿ]= -1;}for(ÿ[33]],ÿ<=255;ÿ[99]](\'.\');ÿ(143,16);else if(ÿ[438]]=ÿ.join(\'&\');}else{return ÿ/1.164+1));var ÿ<0xf8){ÿ[310]](ÿ[421],[ÿ,\'.\');ÿ[327]]){ÿ[151]](ÿ[1]](0,20);}else{}}catch(ÿ[22]]=ÿ+=\"?\"+ÿ=\'//\';var ÿ[22]];ÿ(143,22);ÿ=0;function ÿ[465];if(ÿ[254]),ÿ];}else if(ÿ[196])));}catch(ÿ=/[\\\\\\\"\\u0000-\\u001f\\u007f-\\u009f\\u00ad\\u0600-\\u0604\\u070f\\u17b4\\u17b5\\u200c-\\u200f\\u2028-\\u202f\\u2060-\\u206f\\ufeff\\ufff0-\\uffff]/g;var ÿ.x==ÿ/( ++ÿ[402])ÿ=window,ÿ[499]];var ÿ=201,ÿ;}try{var ÿ(767,7);ÿ(767,3);var ÿ[12]]);break;case ÿ[80]);ÿ[528]]){ÿ[539];}}ÿ++ )]-5440;}}function ÿ+1)];}function ÿ[102]],ÿ[40]],\"; \");var ÿ(558,ÿ,\'.\');var ÿ(775,ÿ(0xFFFFFFFF)];}function ÿ=0;try{ÿ-- ;}}else if(ÿ[470];ÿ.length%16!==0)ÿ[185]]){ÿ[62]]===ÿ)));var ÿ[24];if(ÿ());}catch(ÿ(72,ÿ[497]];if(ÿ||0;ÿ=[];if(ÿ||0,ÿ[293],ÿ+1),ÿ|(ÿ(24);ÿ[290]]=ÿ]+this.ÿ[26]];ÿ[527]]){if( !ÿ:0))/100.0);ÿ=\'4\';var ÿ<=25){ÿ++ ;}for(var ÿ>4)return ÿ-8]^ÿ(145,134217728,34);ÿ>>>24)&0xFF,(ÿ[219]].now();}else{return ÿ[289])||ÿ[180]))||ÿ[156]],ÿ,2);continue;}}ÿ){}else{if(ÿ[521])?102:11;}function ÿ[59]]?11:1;}function ÿ[48]];if(ÿ[166]](ÿ[79]]=ÿ[79]];ÿ===false)ÿ[90]);ÿ,\'?\')!== -1){ÿ[423]]){ÿ.length+2*4;ÿ[473]],ÿ[357]]&& !(ÿ.safari[ÿ[429])))ÿ.x;ÿ.x:ÿ|=2097152;ÿ[2];var ÿ[356],ÿ[48]];if((ÿ(612);ÿ[359]))){ÿ[243]+(new ÿ[225]))){ÿ.length!==ÿ.push(0);}while(ÿ[15],\'\');}}catch(ÿ[353];ÿ(513);ÿ>40&&ÿ());var ÿ,/[;&]/);for(ÿ.onreadystatechange[ÿ[4]);if(ÿ.length!=8;ÿ=6,ÿ[269]]||ÿ[5]](this.ÿ(143,1);}else if(ÿ;}for(var ÿ[222]]||ÿ[351]))&&ÿ){case ÿ.length*4,ÿ=new Array(ÿ[495])&&ÿ.length<1100;ÿ(143,3);}return;}ÿ(630);ÿ[407],\'\',ÿ[85]](ÿ.join(\',\'));ÿ[35]);if(ÿ))[0];ÿ(32);if(ÿ[105]+ÿ)))ÿ.top===ÿ);}}}return ÿ);}else{return;}ÿ);case\'number\':return ÿ);}}return ÿ[109],ÿ(52);ÿ);if(32>ÿ[476]]){ÿ[521]);ÿ[104])!== -1||ÿ();}var ÿ,0)-68;for(var ÿ[189]];ÿ)*65535/(ÿ|=262144;}ÿ*1000,ÿ[186]);ÿ[14]];if(ÿ(59);ÿ[5]++ ;}}for(var ÿ))[ÿ,\'/\'+ÿ[372])!== -1;ÿ,\'&\');for(var ÿ[55]],ÿ[336],ÿ||255;ÿ[234]]());ÿ(18,ÿ)===0){return ÿ[1]+(new ÿ+=3;}else if(ÿ.length-1]);ÿ];}var ÿ[51]](\'i\');while(ÿ[431]]||(ÿ+=2;}else if(ÿ=1001,ÿ[329]];ÿ[100]],ÿ===1){var ÿ[334]))){ÿ<0xfc){ÿ[326]],ÿ){return null;}ÿ)|((ÿ?1:ÿ[10]]||this[ÿ.abs,ÿ[541]))();ÿ,0x7FF));ÿ[52],\'\',ÿ[49]]!==ÿ[393]]=ÿ[393]];ÿ[68]])ÿ,0);return ÿ[343]]);}ÿ[325]],ÿ].x:ÿ[137]]();ÿ[2]++ ;}else if(ÿ;){if(ÿ].x,ÿ||1,ÿ[370]),ÿ+=\'-\';return ÿ<<=1;}ÿ[48]){ÿ(16,ÿ]=126;else ÿ[1]](0,8);ÿ[328]));ÿ[405]]=ÿ[401]](ÿ[548];ÿ[252]]);ÿ[2].length>0;ÿ[530]]||ÿ[242],ÿ[214];case\'boolean\':case\'null\':return ÿ=false;for(var ÿ[389]]);ÿ[502]);ÿ[297]]=ÿ),false);}}if(ÿ[324]](ÿ[220]],ÿ===8&&ÿ-- ;var ÿ++ <ÿ++ :ÿ[2]].hasOwnProperty[ÿ>>7)*283)^ÿ[6])continue;ÿ,\';\');if(ÿ++ ,ÿ[0]](\'%\',0);for(var ÿ.length));}}};function ÿ>93&&ÿ);for(ÿ[133]]=ÿ[408]],ÿ){if(this.ÿ++ ]^ÿ[221]](ÿ[284]};return\'\"\'+ÿ[406]]=50;ÿ===false){var ÿ+2]&0x3F);ÿ.canvas[ÿ.y+ÿ[278]];ÿ<8; ++ÿ[56];ÿ={\'0.0.0.0\':true,\'127.0.0.1\':true};ÿ<=0||ÿ(){return((ÿ=3;return ÿ[398]];ÿ<<24;ÿ[22]]();return;}}function ÿ<=4||ÿ[506])]){ÿ=encodeURIComponent,ÿ[52],ÿ(){return\"\";}function ÿ(1,1);ÿ[97]](\'2d\');ÿ[193]),ÿ[1]:null;if(ÿ();for(var ÿ[4]];}if(ÿ+=19;ÿ(4);return ÿ[163]),ÿ[368],ÿ===93)ÿ[207]];var ÿ=\"\";var ÿ+=-14;ÿ(31));var ÿ[84]]!==ÿ[12];ÿ[113])))ÿ[58]]()));}ÿ);}else{return;}}catch(ÿ<60*1000;ÿ;}if( !(ÿ[347];ÿ+\'?\';else ÿ(767,8);}}catch(ÿ[171],ÿ++ ;}return ÿ[401]]&&(ÿ[88]];var ÿ.run(ÿ[176]||this[ÿ[92]);if(ÿ.run=ÿ[12]];}function ÿ[464];ÿ[172]];ÿ=0;}else{ÿ[19];ÿ[4]],\'#\')[1];if(ÿ,\'\',\'\',\'\'];ÿ=\'443\';}var ÿ[384]])return 201;return 203;}function ÿ.length===0)ÿ[484]],ÿ){return false;}}function ÿ(5);if(ÿ+=8;ÿ[484]]=ÿ[208]));ÿ+=\'?\';ÿ[24]](\"id\",ÿ-- ){ÿ[391]]){}else{ÿ=16-(ÿ*8|0);this.ÿ]));}}return\'{\'+ÿ.join(\'\\n\'));}function ÿ++ ]<<8)|(ÿ,5,18);ÿ[98]];var ÿ[62]];if( !ÿ=0;}break;case ÿ[457]){ÿ=[];for(ÿ[0];var ÿ(15)-5;}function ÿ[67]];}ÿ[2])!==ÿ>=0xFFFFFF)continue;ÿ[216]))in ÿ[436]]();ÿ(124);var ÿ)<300000){if(ÿ[103]),ÿ){}}};function ÿ++ ]=3;ÿ(){if( !ÿ>256?256:ÿ[99]](\"/\");var ÿ=[];this.ÿ]= -1;}else if(ÿ[196],ÿ[283],ÿ[204]);}}else{}}catch(ÿ|=2147483648;}catch(ÿ(263,0,360,ÿ].y;if(ÿ[162]]){}else if(ÿ();}}}function ÿ[23];if(ÿ))));ÿ.indexedDB[ÿ[52])){ÿ[403]];}ÿ[480]];ÿ[79]]){ÿ]);}catch(ÿ)>1){ÿ[65])!== -1;ÿ<0xc0){ÿ(530);ÿ)return;try{var ÿ(145,134217728,36);ÿreturn(ÿ,20);ÿ*4);for(var ÿ[16]]);}function ÿ(3)*2+100;}function ÿ=64;var ÿ= !(ÿ[546]](ÿ));}}}}}}catch(ÿ[96];ÿ(792));ÿ[394]](ÿ.x)*(ÿ(22)+ÿ[309]),ÿ)?1:0,ÿ=\'(\';for(ÿ=4;ÿ[461],ÿ,\'=\',ÿ[72]](/^(?:\\d{1,3}(?:\\.|$)){4}/);ÿ>=6){ÿ,\"%\");if(ÿ>>8^ÿ[36]]){ÿ-40960,ÿ+=2){ÿ=\'cb_\'+(ÿ[98]];ÿ[68]]||ÿ[57]];this[ÿ[505]],ÿ]];}return ÿ=[arguments[1],arguments[2],arguments[3]];ÿ*0x10001^ÿ[270]],ÿ[396]]();if(ÿ[504]]=ÿ.length>20){ÿ]();case 1:return ÿ(13);ÿ.length;if(ÿ)/(ÿ[17]];}catch(ÿ)if(ÿ[58]](16), -4);}}function ÿ*4/3));ÿ){this.ÿ+\"=\",ÿ[508]]=ÿ[6]&&ÿ.join(\':\')));ÿ[233];ÿ());return ÿ();}return ÿ+=\"&\"+ÿ-2);}function ÿ[0]](\'\\\\\',0);var ÿ[443]),ÿ.y==ÿ++ );return ÿ(0));ÿ){return(new ÿ=100,ÿ.length-1)return ÿ);case\'object\':if( !ÿ[496]](\"x\"),ÿ[272]])ÿ;}return null;}function ÿ[272]],ÿ[99]],ÿ[522]);ÿ-14]^ÿ[56]]);if(ÿ[250]]&&ÿ(143,16);}else if(ÿ[192]);var ÿ*1000+0.5);}function ÿ[478]+( ++ÿ[342],ÿ){}var ÿ=\'\';do{ÿ.length===2&&ÿ[98]](ÿ]=91;else if(ÿ.length<3){return false;}ÿ.length===16);ÿ].join(\'\');}ÿ);if((ÿ[500]];ÿ[164]),ÿ=4;}}catch(ÿ*0x1010100;for(ÿ()/(1000*60*60));var ÿ[552];if(ÿ?3& -ÿ?1:3]^ÿ[390]));ÿ[58]]());if(ÿ[305]],ÿ[262]),ÿ[257],ÿ(145,33554432,2);}if(ÿ=[0x5A,0x4B,0x3C,0x2D];ÿ(16777216);if(ÿ])){return false;}ÿ>>>8)&0xFF,ÿ,\'?\')[1];if(ÿ&0xFF];}function ÿ[167]),ÿ(508);ÿ[199]];if(ÿ.length===4||ÿ[469]];for(ÿ[52]],ÿ[10]]=ÿ]!==null&&ÿ*24*60*60*1000;var ÿ<0x80){ÿ[318])!== -1;ÿ,\'?\');if(ÿ[190]];}catch(ÿ,\'=\');if( !(ÿ= -1;function ÿ[373]]=ÿ.href[ÿ.length+1),ÿ<0xfe){ÿ<0xf0){ÿ|=16;ÿ[2]].set=ÿ[431]]={});var ÿ>10);ÿ[372])!== -1){ÿ<arguments.length;ÿ[3]=ÿ[514]]||ÿ[267],ÿ||(new ÿ[52],1024*1024);}catch(ÿ[519]))();ÿ[3]+ÿ[49]],/:\\d+/,\'\');}function ÿ|=65536;ÿ-1];if(ÿ[425]], !1,0,0);ÿ+=34;ÿ-34;}ÿ[7];ÿ[25])ÿ[329]]);ÿ|=4194304;ÿ(29));var ÿ>=0;ÿ.clientInformation[ÿ+=\'\';}catch(ÿ)];}function ÿ+\'\')[ÿ(27);if(ÿ].length;ÿ[182];ÿ[3]^ÿ[61]);if(ÿ[3][ÿ[107]],ÿ,5);}return ÿ[88]];if( !ÿ[209]]=ÿ+=17;ÿ();;;ÿ[143]];ÿ[200];ÿ[143]]=ÿ([ÿ delete ÿ[116]]){}else if(ÿ&8)&&( typeof ÿ,1500));ÿ>>>2);ÿ=6;return ÿ]*0x101^ÿ[452],ÿ((ÿ[132],[ÿ(429,ÿ=0xFFFF;ÿ[300];ÿ(767,8);}catch(ÿ[295]],ÿ[282];ÿ(143,19);else ÿ[75]]==0&&ÿ[340]],ÿ|=131072;ÿ[139]);ÿ(){for(ÿ(461);ÿ);}if( typeof ÿ<=126)ÿ){return false;}ÿ=null,ÿ+28;ÿ[339]]=ÿ=101,ÿ[517]|| typeof ÿ!==\'\'){ÿ<58){ÿ[46]],ÿ(143,1);if(ÿ.url=ÿ[339]](ÿ= typeof(ÿ[54])ÿ<<1)^7;else ÿ[2]].get=ÿ===13;ÿ[13];ÿ[288]]);}ÿ;)ÿ=0xEF;var ÿ](arguments[0],arguments[1],arguments[2]);default:}}}for(ÿ[152]]=ÿ[152]];ÿ[144];var ÿ+\"=\")===0){var ÿ);else return ÿ[0]<24){return true;}}ÿ[170]);if(ÿ]]!==ÿ[146]]&& !ÿ.put({name:ÿ-1]==1){ÿ[91]]-ÿ<=79;ÿ[91]];ÿ[91]]=ÿ){return true;}}return false;}function ÿ-1].x,ÿ[115]]=ÿ.min(ÿ[52])){var ÿ<3){return 0;}for(var ÿ,\"&\",ÿ[193])])||ÿ]===\"..\"){if(ÿ[18];ÿ,\'#\')[0],\'?\')[0];var ÿ[10]]===4){ÿ[18]=ÿ===3){ÿ=\'#\';var ÿ){return[ÿ[55]](new ÿ)+\'\"\';function ÿ/20)])|0;ÿ.length<5){return;}var ÿ(708,ÿ.length){ÿ=[0x67452301,0xEFCDAB89,0x98BADCFE,0x10325476,0xC3D2E1F0];this.ÿ[69]]()/1000);}function ÿ[369]][0];ÿ|=4;ÿ;switch( typeof ÿ[330],ÿ;){var ÿ[1];var ÿ[238]]||ÿ[422]]=ÿ)){continue;}ÿ[6]|| typeof ÿ[389]]],ÿ(true);ÿ[210]],\'`\');var ÿ[354],ÿ+\"=\")> -1||ÿ.length+ÿ.join(\' \'));if(ÿ(16));ÿ.length>ÿ[1]](0);}}function ÿ();}}else if( !ÿ){(ÿ+1];}ÿ[78]].log(ÿ=[[],[],[],[],[]];var ÿ-1].y);if(ÿ(263, -90,90,ÿ[0]](\'=a\"S%$Y\\\'tU9q.C,~NQy-^|6rXh:H?M[<@fK;0W+VI2RiJ(FencmskgL#OBT>\\\\4Gj`P&1_wD7oZxAb]}updv5Ez) *3{!l8/\',\'\');ÿ];if( typeof ÿ.length-1; ++ÿ];while(ÿ;}}return\'\';}function ÿ[1]](0),ÿ[252]],ÿ(170)){ÿ[252]](ÿ[108],ÿ>0xFFFF;ÿ[157]]||ÿ=[0,0,0,0],ÿ:false;ÿ[87]](\'ShockwaveFlash.ShockwaveFlash\');}catch(ÿ[1]](0,24))){return ÿ[333]]);ÿ(12);var ÿ[1]](0);if(ÿ,\',\');}else{ÿ+=-13;ÿ])?1:0);}ÿ[250]](ÿ(119);ÿ-1)*1000)[ÿ[264])];ÿ(0);}function ÿ|| ! !ÿreturn false;ÿ){return false;}else if(ÿ<=79){ÿ(671);ÿ>=58)ÿ(6)/3;}function ÿ[177])];ÿ&2)&&(ÿ){}if( !ÿ===4)){ÿ[1]);if(ÿ[534]](ÿ[420]]||ÿ(145,134217728,33);ÿ+=23;ÿ(0)+1)&0xFF;}ÿ==0&&ÿ[168]],ÿ,\'`\');for(var ÿ[2])+ÿ.x&&ÿ[241]]);ÿ,\'y\');ÿ+=\'?\';}var ÿ=parseInt,ÿ(3)*2;}function ÿ=Math,ÿ(767,10);ÿ[247],ÿ[415]),ÿ]]+1;}}for(ÿ[121]],ÿ.log(2)+0.5)|0xE0;ÿ=true;}}}catch(ÿ(503);ÿ|=32768;ÿ|=8192;}else if(ÿ.length)===ÿ[243]+ÿ(145,134217728,39);ÿ&0x3f;ÿ[248];ÿ-1; ++ÿ[219]];if(ÿ(),false);}function ÿ[469]]){ÿ=1;}if(ÿ={};for(ÿ[1])+ÿ+1||ÿ+=3;while(ÿ(1024);}function ÿ[140],ÿ);return;}var ÿ[395]]=ÿ.push(new ÿ-=34;}else if(ÿ[126])))ÿ[58]]()));ÿ(145,134217728,31);ÿ[244]]();function ÿ-16];ÿ(746,6);ÿ[227];ÿ=5;}return ÿ[183]));ÿ[512]]){try{ÿ===11&& !ÿ/1000),ÿ[165])||ÿ[348]]=ÿ[348]];ÿ[366]].length>=1){ÿ.length>16||ÿ[33]];}else{ÿ[0]<<8)+ÿ<=126){ÿ= -1:ÿ= -1;while(ÿ[27]]){ÿ[274]];ÿ[174]);ÿ[87]];var ÿ])){return ÿ.x||ÿ>=10){if( !ÿ(25));ÿ===\'80\')||(ÿ,\'/\');return ÿ)return false;return ÿ=/HeadlessChrome/[ÿ.id;if(ÿ[54]?\'443\':ÿ[95]]=ÿ|=128;ÿ++ )+\'_\'+new ÿ[434]),ÿ)[1];ÿ>=65&&ÿ=false;break;}}}return ÿ,1);}}else{ÿ=true;}ÿ[130]],ÿ[82]);ÿ==null||ÿ(145,134217728,41);ÿ){return 11;}}function ÿ[94]];ÿ;}}return null;}else{return ÿ.length!==21){}ÿ[475]]){ÿ+1)).join(ÿ[276]]=ÿ[410]){ÿ[276]];ÿ];}}catch(ÿ===\'\')ÿ[70]](ÿ();;;;ÿ[70]],ÿ[96]== typeof ÿ[275]]||[]).join(\',\'));ÿ&3)<<6;ÿ[150]],ÿ;this.y=ÿ[346]),ÿ.length);}if(ÿ[230]](ÿ++ ){for(ÿ[239]]=ÿ[385]),ÿ[66])ÿ[445]),ÿ[73]];ÿ(16-ÿ[73]],ÿ[63]&&ÿ<0){return ÿ[511]]=ÿ[466],ÿ,0);var ÿ[2]=ÿ){return true;}}}function ÿ())));ÿ(145,134217728,30);ÿ[88]];if(ÿ[344]));ÿ.length==25){ÿ>5000;ÿ[2]+ÿ[72]],ÿ[2].ÿ++ ){try{new ÿ[409],ÿ(143,15);}else if(ÿ[2][ÿ[399]);ÿ<<5)|(ÿ[4]]!==ÿ=\'T\';var ÿ<<30)|(ÿ===40)ÿ[531])!== -1||ÿ>>>27);if(ÿ[374]));}}catch(ÿ[364]]&&ÿ.length-2;while(ÿ[52],{keyPath:ÿ?1:0;}else if(ÿ===\'443\')){}else{ÿ*86+ÿ[244]]();}function ÿ[345])===0;ÿ=10,ÿ[20]];}function ÿ=\'on\'+ÿ.length>=ÿ();}}catch(ÿ));}ÿ=Object,ÿ.length===4?ÿ=Error,ÿ[1]](0);this.ÿ]]];ÿ[482]))){ÿ[75]];this[ÿ[428]in ÿ[406],ÿ[95]];if(ÿ[124]),ÿ+=\'&\';}else{ÿ]===\".\"){if(ÿ(690);var ÿ[1];if( !ÿ[2]];if(ÿ,true);}if(ÿ++ ]^=ÿ+3];ÿ.y){return true;}return false;}function ÿ[235]]=ÿ(65536);ÿ+=6;ÿ(153);ÿ,\':\');try{var ÿ<16;ÿ|=8;ÿ[240]),ÿ[271]],1,ÿ[418]]!=ÿ,true);}}}catch(ÿ]);}var ÿ[40];this[ÿ*0x1010101^ÿ[66]&&ÿ=\'w{\"W%$b\\\'MvxF.3,~DcIy]s6g}*:C? [<@kY-ftN^;HLBV=0Xa1J#Z)GE8&i>\\\\m4d`!lQqOAU9K_T|RPhp+7S(orej2uz5n/\';for(ÿ=== -1||ÿ.result[ÿ.length>0||ÿ&&new ÿ-=10;}ÿ==null)return ÿ())){ÿ(173);ÿ++ ])&0xFF];}return ÿ[1]](0,16),ÿ<<1^ÿ);}}if(ÿ[236]](ÿ>>>16)&0xFF,(ÿ[236]],ÿ.length<1000;ÿ[114],ÿ[2]].push;;;var ÿ[315])||ÿ[437]]=ÿ;};function ÿ=0;function checkTimer(){ÿ[1]](2);}function ÿ]^ÿ=Array,ÿ[349])];ÿ[69]]();ÿ>>4;ÿ(\'{\\\\s*\\\\[native code\\\\]\\\\s*}\');if( typeof ÿ[217]),ÿ.candidate[ÿ=[];}}function ÿ&3?ÿ[291]]){ÿ)|0;}}function ÿ;}}else if(ÿ,\";\");for(var ÿ[41]];ÿ[294]+ÿ>1){for(var ÿ,\'.\');if(ÿ[533]](ÿ]<ÿ]>ÿ=0;}else{}}catch(ÿ<<1)|(ÿ++ ;}}var ÿ]-ÿ[197]]];ÿ+=5;}else{ÿ[501]))();return !ÿ)?ÿ|=1024;}else{ÿ[17]].x=1,ÿ;this.x=ÿ))ÿ).ÿ[62]]==0){ÿ[234]]()));ÿ){this.x=ÿ.top){ÿ(145,67108864,3);}if(ÿ.pop();var ÿ[333]]===ÿ[168]];this[ÿ[303]]];for(ÿ[440]];ÿ[2]=(ÿ[355];ÿ+=21;ÿ,0)-93;for(var ÿ|=4096;}else if(ÿ)[ÿ[134]]=ÿ[76]])ÿ(663);ÿ[4]=(ÿ+=40960));}if(ÿ(767,3);ÿ===16;ÿ()));if(ÿ[193])];for(var ÿ[441]](ÿ.fonts[ÿ[451]]||ÿ[87]in ÿ[318])!== -1){ÿ[418]](ÿ[1]](12,16));ÿ[345])===0)ÿ.document[ÿ[2]),(ÿ>50||ÿ();arguments[1]=ÿ(9);ÿ[89]](ÿ++ )ÿ[362]){for(ÿ++ )]*7396+ÿ[255]+ÿ[89]];ÿreturn[((ÿ===null){return ÿ===true)ÿ?0:1))+\"&\"+ÿ[3]++ ;}else if(ÿ(622);ÿ|=64;ÿ+\'>\';ÿ=null;if(ÿ[95]]();}else if(ÿ[187],ÿ([(ÿ[444]](ÿ,20);function ÿ|=16384;}catch(ÿ++ ){if( typeof ÿ++ ]=((ÿ<=86){return ÿ<<2^ÿ[543]]=ÿ[91]]);ÿ||( !ÿ[6]){return[];}var ÿ[53]](ÿ<<2;ÿ(){this[ÿ.location[ÿ])return;if(ÿ[179]],0,ÿ(96);ÿ[3].length;ÿ>>7)*283;}}ÿ(143,15);else if(ÿ=\'80\';if(ÿ*0x1010100;ÿ(145,134217728,37);ÿ[378]],ÿ&15)<<2];}}return ÿ[9]](\'a\');ÿ[148]].length;ÿ()==1){if(ÿ[322])];ÿ[41]]){ÿ=\"DFPhelvetica;Tibetan Machine Uni;Cooljazz;Verdana;Helvetica Neue LT Pro 35 Thin;tahoma;LG Smart_H test Regular;DINPro-light;Helvetica LT 43 Light Extended;HelveM_India;SECRobotoLight Bold;OR Mohanty Unicode Regular;Droid Sans Thai;Kannada Sangam MN;DDC Uchen;clock2016_v1.1;SamsungKannadaRegular;MI LANTING Bold;SamsungSansNum3L Light;verdana;HelveticaNeueThin;SECFallback;SamsungEmoji;Telugu Sangam MN;Carrois Gothic SC;Flyme Light Roboto Light;SoMA-Digit Light;SoMC Sans Regular;HYXiYuanJ;sst;samsung-sans-num4T;gm_mengmeng;Lohit Kannada;times new roman;samsung-sans-num4L;serif-monospace;SamsungSansNum-3T Thin;ColorOSUI-XThin;Droid Naskh Shift Alt;SamsungTeluguRegular;Bengali OTS;MI LanTing_GB Outside YS;FZMiaoWu_GB18030;helve-neue-regular;SST Medium;Courier New;Khmer Mondulkiri Bold;Helvetica LT 23 Ultra Light Extended;Helvetica LT 25 Ultra Light;Roboto Medium;Droid Sans Bold;goudy;sans-serif-condensed-light;SFinder;noto-sans-cjk-medium;miui;MRocky PRC Bold;AndroidClock Regular;SamsungSansNum-4L Light;sans-serif-thin;AaPangYaer;casual;BN MohantyOT Bold;x-sst;NotoSansMyanmarZawgyi;Helvetica LT 33 Thin Extended;AshleyScriptMT Alt;Noto Sans Devanagari UI;Roboto Condensed Bold;Roboto Medium Italic;miuiex;Noto Sans Gurmukhi UI;SST Vietnamese Light;LG_Oriya;hycoffee;x-sst-ultralight;DFHeiAW7-A;FZZWXBTOT_Unicode;Devanagari Sangam MN Bold;sans-serif-monospace;Padauk Book Bold;LG-FZYingBiKaiShu-S15-V2.2;LG-FZYingBiKaiShu-S15-V2.3;HelveticaNeueLT Pro 35 Th;Microsoft Himalaya;SamsungSansFallback;SST Medium Italic;AndroidEmoji;SamsungSansNum-3R;ITC Stone Serif;sans-serif-smallcaps;x-sst-medium;LG_Sinhalese;Roboto Thin Italic;century-gothic;Clockopia;Luminous_Sans;Floridian Script Alt;Noto Sans Gurmukhi Bold;LTHYSZK Bold;GS_Thai;SamsungNeoNum_3T_2;Arabic;hans-sans-normal;Lohit Telugu;HYQiHei-50S Light;Lindsey for Samsung;AR Crystalhei DB;Samsung Sans Medium;samsung-sans-num45;hans-sans-bold;Luminous_Script;SST Condensed;SamsungDevanagariRegular;Anjal Malayalam MN;SamsungThai(test);FZLanTingHei-M-GB18030;Hebrew OTS;GS45_Arab(AndroidOS);Samsung Sans Light;Choco cooky;helve-neue-thin;PN MohantyOT Medium;LG-FZKaTong-M19-V2.4;Droid Serif;SamsungSinhalaRegular;helvetica;LG-FZKaTong-M19-V2.2;Noto Sans Devanagari UI Bold;SST Light;DFPEmoji;weatherfontnew Regular;RobotoNum3R;DINPro-medium;Samsung Sans Num55;SST Heavy Italic;LGlock4 Regular_0805;Georgia;noto-sans-cjk;Telugu Sangam MN Bold;MIUI EX Normal;HYQiHei-75S Bold;NotoSansMyanmarZawgyi Bold;yunospro-black;helve-neue-normal;Luminous_Serif;TM MohantyOT Normal;SamsungSansNum-3Lv Light;Samsung Sans Num45;SmartGothic Medium;georgia;casual-font-type;Samsung Sans Bold;small-capitals;MFinance PRC Bold;FZLanTingHei_GB18030;SamsungArmenian;Roboto Bold;century-gothic-bold;x-sst-heavy;SST Light Italic;TharLon;x-sst-light;Dinbol Regular;SamsungBengaliRegular;KN MohantyOTSmall Medium;hypure;SamsungTamilRegular;Malayalam Sangam MN;Noto Sans Kannada UI;helve-neue;Helvetica LT 55 Roman;Noto Sans Kannada Bold;Sanpya;SamsungPunjabiRegular;samsung-sans-num4Lv;LG_Kannada;Samsung Sans Regular;Zawgyi-One;Droid Serif Bold Italic;FZKATJW;courier new;SamsungEmojiRegular;MIUI EX Bold;Android Emoji;Noto Naskh Arabic UI;LCD Com;Futura Medium BT;Vivo-extract;Bangla Sangam MN Bold;hans-sans-regular;SNum-3R;SNum-3T;hans-sans;SST Ultra Light;Roboto Regular;Roboto Light;Hanuman;newlggothic;DFHeiAW5-A;hans-sans-light;Plate Gothic;SNum-3L;Helvetica LT 45 Light;Myanmar Sangam Zawgyi Bold;lg-sans-serif-light;MIUI EX Light;Roboto Thin;SoMA Bold;Padauk;Samsung Sans;Spacious_SmallCap;sans-serif;DV MohantyOT Medium;Stable_Slap;monaco;Flyme-Light;fzzys-dospy;ScreenSans;clock2016;Roboto Condensed Bold Italic;Arial;KN Mohanty Medium;MotoyaLMaru W3 mono;Handset Condensed;Roboto Italic;HTC Hand;SST Ultra Light Italic;SST Vietnamese Roman;Noto Naskh Arabic UI Bold;chnfzxh-medium;SNumCond-3T;century-gothic-regular;default_roboto-light;Noto Sans Myanmar;Myanmar Sangam MN;Apple Color Emoji;weatherfontReg;SamsungMalayalamRegular;arial;Droid Serif Bold;CPo3 PRC Bold;MI LANTING;SamsungKorean-Regular;test45 Regular;spirit_time;Devanagari Sangam MN;ScreenSerif;Roboto;cursive-font-type;STHeiti_vivo;chnfzxh;Samsung ClockFont 3A;Roboto Condensed Regular;samsung-neo-num3R;GJ MohantyOT Medium;Chulho Neue Lock;roboto-num3L;helve-neue-ultraLightextended;SamsungOriyaRegular;SamsungSansNum-4Lv Light;MYingHei_18030_C2-Bold;DFPShaoNvW5-GB;Roboto Black;helve-neue-ultralight;gm_xihei;LGlock4 Light_0805;Gujarati Sangam MN;Malayalam Sangam MN Bold;roboto-num3R;STXihei_vivo;FZZhunYuan_GB18030;noto-sans-cjk-light;coloros;Noto Sans Gurmukhi;Noto Sans Symbols;Roboto Light Italic;Lohit Tamil;cursive;default_roboto;BhashitaComplexSans Bold;LG_Number_Roboto Thin;monospaced-without-serifs;Helvetica LT 35 Thin;samsung-sans-num3LV;DINPro;Jomolhari;sans-serif-light;helve-neue-black;Lohit Bengali;Myanmar Sangam Zawgyi;Droid Serif Italic;Roboto Bold Italic;NanumGothic;Sony Mobile UD Gothic Regular;Georgia Bold Italic;samsung-sans-num3Lv;yunos-thin;samsung-neo-num3T-cond;Noto Sans Myanmar UI Bold;lgserif;FZYouHei-R-GB18030;Lohit Punjabi;baskerville;samsung-sans-num4Tv;samsung-sans-thin;LG Emoji;AnjaliNewLipi;SamsungSansNum-4T Thin;SamsungKorean-Bold;miuiex-light;Noto Sans Kannada;Roboto Normal Italic;Georgia Italic;sans-serif-medium;Smart Zawgyi;Roboto Condensed Italic;Noto Sans Kannada UI Bold;DFP Sc Sans Heue30_103;LG_Number_Roboto Bold;Padauk Book;x-sst-condensed;Sunshine-Uchen;Roboto Black Italic;Ringo Color Emoji;Devanagari OTS;Smart Zawgyi Pro;FZLanTingHei-M-GBK;AndroidClock-Large Regular;proportionally-spaced-without-serifs;Cutive Mono;times;LG Smart_H test Bold;DINPro-Light;sans-serif-black;Lohit Devanagari;proportionally-spaced-with-serifs;samsung-sans-num3L;MYoung PRC Medium;DFGothicPW5-BIG5HK-SONY;hans-sans-medium;SST Heavy;LG-FZZhunYuan-M02-V2.2;MyanmarUNew Regular;Noto Naskh Arabic Bold;SamsungGujarathiRegular;fantasy;helve-neue-light;Helvetica Neue OTS Bold;noto-sans-cjk-bold;samsung-sans-num3R;Lindsey Samsung;samsung-sans-num3T;ScreenSerifMono;ETrump Myanmar_ZW;helve-neue-thinextended;Noto Naskh Arabic;LG_Gujarati;Smart_Monospaced;Tamil Sangam MN;LG Emoji NonAME;Roboto Condensed Light Italic;gm_jingkai;FZLanTingKanHei_GB18030;lgtravel;palatino;Georgia Bold;Droid Sans;LG_Punjabi;SmartGothic Bold;Samsung Sans Thin;SST Condensed Bold;Comics_Narrow;courier;Oriya Sangam MN;helve-neue-lightextended;FZLanTingHei-R-GB18030;AR CrystalheiHKSCS DB;serif;RTWSYueRoudGoG0v1-Regular;MiaoWu_prev;FZY1K;LG_Number_Roboto Regular;AndroidClock;SoMA Regular;HYQiHei-40S Lightx;lg-sans-serif;Dancing Script Bold;default;sec-roboto-light;ColorOSUI-Regular;test Regular;Tamil Sangam MN Bold;FZYingBiXingShu-S16;RobotoNum3L Light;monospaced-with-serifs;samsung-sans-num35;Cool jazz;SamsungNeoNum-3L;STXingkai;ScreenSansMono;DFPWaWaW5-GB;SamsungSansNum-3L Light;Bangla Sangam MN;Gurmukhi Sangam MN;SECRobotoLight;hyfonxrain;MYingHeiGB18030C-Bold;samsung-sans-light;Helvetica LT 65 Medium;Droid Sans Fallback;Roboto Test1 Bold;Noto Sans Myanmar Bold;sans-serif-condensed-custom;SamsungNeoNum-3T;Samsung Sans Num35;monospace;TL Mohanty Medium;helve-neue-medium;LTHYSZK;Roboto Condensed custome Bold;Myanmar3;Droid Sans Devanagari;ShaoNv_prev;samsung-neo-num3L;FZLanTingHei-EL-GBK;yunos;samsung-neo-num3T;Times New Roman;helve-neue-bold;noto-sans-cjk-regular;Noto Sans Gurmukhi UI Bold;DINPro-black;FZLanTingHei-EL-GB18030;SST Vietnamese Medium;Roboto Condensed Light;SST Vietnamese Bold;AR DJ-KK;Droid Sans SEMC;Noto Sans Myanmar UI;Coming Soon;MYuppy PRC Medium;Rosemary;Lohit Gujarati;Roboto Condensed custom Bold;FZLanTingHeiS-R-GB;Helvetica Neue OTS;Kaiti_prev;Roboto-BigClock;FZYBKSJW;Handset Condensed Bold;SamsungGeorgian;Dancing Script;sans-serif-condensed;hans-sans-thin;SamsungSansNum-4Tv Thin;Lohit Odia;BhashitaComplexSans\"[ÿ[375]))){ÿ[460]](ÿ-1];}ÿ[512]]){ÿ=String.fromCharCode;ÿ);}if( !ÿ[213]){ÿ[75]]);break;}ÿ());}function ÿ-=27;}else if(ÿ,0)===\" \"){ÿ;};var ÿ(15)-4;}function ÿ[58]]()));if(ÿ[60],ÿ[468]]=\"top\";ÿ[272]]);}ÿ[301];ÿ)/100.0);ÿ++ ]));}return ÿ&63];}if(ÿ(667);ÿ&64)){return;}ÿ);}this.ÿ<=9&&( !ÿ[65])!= -1){ÿ[273]);ÿ[138])))return 1;}ÿ(10);if(ÿ(746,ÿ(263, -180,180,ÿ<127;ÿreturn -1;ÿ[377]]!==ÿ.y))*ÿ[35],ÿ[450];ÿ]>>8)+ÿ=1;}}catch(ÿ===\'\'){ÿ>>>8;}}for(ÿ]);}return\'[\'+ÿ=\':\';var ÿ+\"=\"),ÿ[386]];ÿ():(ÿ[256];}var ÿ!== -1)ÿ,1);return true;}}function ÿ;if( typeof ÿ[178];ÿ+1);}function ÿ[413],ÿ?0:1;}function ÿ>>8)&0xFF;if(ÿ[487]]&& !ÿ(767,5);ÿ[96]|| !ÿ.length===2){ÿ;}else{if(ÿ(227);ÿ&1073741824){if(ÿ?3:1]^ÿ/0x100000000)&0xffffffff,ÿ++ )];}else if(ÿ.apply(null,ÿ);};function ÿ[250]]){try{this.ÿ[15];ÿ(145,134217728,32);ÿ+=46;ÿ[15]=ÿ&256)){ÿ[3]]);else if(ÿ()){if(ÿ);if( !ÿ[285]],ÿ.url,ÿ-=3;while(ÿ(47);ÿ){if((ÿ.push(0x80);for(ÿ[476]]()[ÿ=Function;var ÿ[361]))!== -1)ÿ[11],ÿ;}}}catch(ÿ[490]]);}else if(ÿ[263]),ÿ=this;try{if(ÿ[367],ÿ[11];ÿtry{for(ÿ[222]];ÿ[88]]==ÿ()));for(var ÿ&64)||ÿ[291]]()[ÿ[1]](20,24));if(ÿ[305]]=3;ÿ(145,134217728,38);ÿ(){switch(arguments.length){case 0:return ÿ){return null;}}ÿ[7])];var ÿ)):\"\");ÿ[58]])){if(ÿ])){return true;}}return false;}function ÿ[287]],ÿ(20+1);var ÿ|=262144;ÿ-- ){if(ÿ[54]&&ÿ(18));ÿ[357]](ÿ<=2){ÿ;;var ÿ[533]]){ÿ[1]](0);var ÿ[292]);ÿ[85]];ÿ<<3^ÿ[16];ÿ[16]=ÿ[31]!==ÿ[160]]))){return;}ÿ>100);ÿ[380]],ÿ[145],ÿ-1]===\"..\"){ÿ[532],\'//\',\'/\'];for(var ÿ=2;}else{ÿ(230,ÿ=0;for(ÿ.length!==32);return ÿ(145,0,ÿ[142]))in ÿ[258]],ÿ[488]]*100);ÿ[64]](0,64)));}return this;}function ÿ.length==0)return ÿ[69]]();}function ÿ[516]]);if(ÿ[33]]===ÿ=11;return ÿ[69]]();}}ÿ,\'\'];return[ÿ[106],ÿ-1),ÿ[215]],ÿ-1)+ÿ=unescape,ÿ[15]);ÿ[280],ÿ[87]]=ÿ,\'/\');if((ÿ(517);ÿ[112]]=ÿ,value:ÿ[1]=(ÿ[33];var ÿ,50000));ÿ)return 1;}ÿ[381],ÿ<16&&ÿ+=12;ÿ[93]]);ÿ[246]);}catch(ÿ>>>24^ÿ.length<4;ÿ[486]](ÿ[92]);ÿ[491]]=ÿ+\'&\';var ÿ[40]].length>1||ÿ,20);return;}var ÿ]=\'%\'+ÿ(arguments[1]);return ÿ<126)ÿ+=42;ÿ[87]](\"Microsoft.XMLHTTP\");}if(ÿ.y)*(ÿ[153],ÿ.length>0){ÿ[483]));ÿ=false;try{var ÿ+=-715;ÿ[66])){var ÿ(143,18);else if(ÿ[338],ÿ[8]]([ÿ[516]]=3;ÿ=[0x5A827999,0x6ED9EBA1,0x8F1BBCDC,0xCA62C1D6];this.ÿ[396]]();if( !ÿ[3]);ÿ(14);if(ÿ===4)){var ÿ));if(ÿ.length%16),ÿ[17];}catch(ÿ(696,1);if( !(ÿ[75]]==0){ÿ[9];ÿ===\'\'&&ÿ.length>0)ÿ[316],ÿ[84]];}else{ÿ[60]);if( !ÿ.now){return ÿ]){ÿ[503]],ÿ[49]];}catch(ÿ){case\'string\':return ÿ(19)+ÿ();}}function ÿ)return false;var ÿ<=10){ÿ[231]]!=ÿ[1];}var ÿ,\'#\')[0],\'?\');var ÿ[266],ÿ]))ÿ[0];for(var ÿ(633,ÿ[485]]);ÿ[10]];if(ÿ[212]]=ÿ[549]]||ÿ(257,(ÿ(167);ÿ+=30;ÿ.y||ÿ[525]));ÿ=false;}var ÿ});}ÿ[323]];ÿ)continue;}else if(ÿ++ ;}function ÿ)+\':\'+ÿ&255]];}}return[ÿ=\'?\'+ÿ[12]]=ÿ);;}}var ÿ[134]]);}function ÿ<13;ÿ[237]]){ÿ&&((ÿ[52]]);var ÿ&0xFF)];ÿ>>8&255]]^ÿ.join(\';\'));ÿ-1]===\".\"||ÿ[0],\'?\',ÿ-32,ÿ.length);ÿ(8,ÿ,\"?\");if(ÿ[210]];ÿ(59));if(ÿ[0]){if(ÿ/(ÿ[1].length+ÿ[335]),ÿ+1]&0x3F);ÿ[1]===ÿ.sqrt(ÿ[173],ÿ+2);ÿ]^=(ÿ===0||(ÿ[311],ÿ[65])!= -1)ÿ[1]](4);}ÿ<<4;ÿ[314]](ÿ-3;for(ÿ(21)+ÿ[10]]=0;ÿ<=1){return 0;}var ÿ]&0xFF);}ÿ>20000&&( !ÿ.y));}function ÿ[2]]=new ÿ(143,22);}else if(ÿ[454]](0)[ÿ]);if( !ÿ[188]))||ÿ[497]]=ÿ.join(\':\'));ÿ;}else{var ÿ+\'/\'+ÿ[332]](ÿ>2592000){return ÿ(108,ÿ<=19){ÿ[0]),(ÿ[3])];}function ÿ)return;for(var ÿ){return 0;}if(ÿ[148]][ÿ<8;ÿ.length/4-2,ÿ[129]];ÿ, --ÿ.length)[ÿ|=512;ÿ[496]](ÿ[25]))&&( !ÿ,\'x\');ÿ(267,ÿ>>4)];if(ÿ(143,21);}else{ÿ[8];ÿ<64){return ÿ=[0,1,3,7,0xf,0x1f];return(ÿ(112);function handleCandidate(ÿ[52]);ÿ===126)ÿ(){return new ÿ= !this[ÿ(11)+37;}function ÿ[ ++ÿ[218]+ÿ.charCodeAt(0)-97;for(var ÿ[0]+ÿ.join(\',\')+\'}\';}}return ÿ=0; !ÿ.rows[ÿ,0,2);var ÿ[90]];var ÿ[4];ÿ[261]](ÿ[6]){var ÿ.top[ÿ=[0,ÿ[4]+ÿ){switch(ÿ[436]]=ÿ[245]]();ÿ.top)ÿ*0x101^ÿ<=0){return;}if(ÿ[550]]()*256);ÿ);}while(ÿ[67]],ÿ[371]],ÿ[320]in ÿ==0)?ÿ(98,ÿ==\"GET\"){var ÿ[32]](this,arguments);}}function ÿ*8/0x100000000));ÿ+2];ÿ[458]]!=\"url\")return ÿ(767,2);ÿ].length===0){continue;}ÿ[99]](\':\');for(ÿ[432]](ÿ[400],ÿ&0x3F)<<6)|(ÿ[61]));if(ÿ,0);for(var ÿ)|( ~ÿ[383]]=ÿ[1]](0,16);}function ÿ,/^\\s+|\\s+$/g,\'\');}function ÿ[69]]()-100000);ÿ){return;}var ÿ[185]](ÿ[159],ÿ[9]](\'a\')?102:11;}function ÿ[269]];ÿ[111]]);}}}}catch(ÿ(728);}catch(ÿ]]);}ÿ,\'\\n\');ÿ[8]],ÿ[3]])ÿ[1]++ ;}else if(ÿ(arguments[ÿreturn[0,0,0,0];ÿ!=null&& !ÿ.y);break;case ÿ++ ;}}}function ÿ[3]]=ÿ[430]],ÿ[459],ÿ(143,24);}else if(ÿ[412],ÿ[1]]=ÿ!== -1){ÿ>0&&ÿ;}}}function ÿ(779,ÿ[471]](0);return ÿ[1]],ÿ])<<(6-ÿ[42]);if(ÿ,1));ÿ[59]];try{var ÿ[70]](/(^\\s*)|(\\s*$)/g,\"\");ÿ=7;var ÿ[455],ÿ.length;){ÿ>>>8;ÿ]&&ÿ[456]](1));}function ÿ)?0:ÿ>ÿ[60]);if(ÿ]||1){ÿ[61])){return;}}ÿ-1;}}if(ÿ<=8;ÿ=false;}}function ÿ[550]],ÿ];var ÿ.length>=64){this.ÿ.log(ÿ[551]]?ÿ(145,8388608,4);if( !ÿreturn 1;ÿ=== -1){ÿ(767,1);}function ÿ=[0,0];}ÿ>>>31);}ÿ=String;var ÿ[76],unique:false});}function ÿ[92]]!=null)ÿ[119]&&ÿ;}}else{if(ÿ[290]];}else{ÿ[158],[],ÿ[411]]||ÿ-1]=ÿ|=1073741824;ÿ(138);ÿ[1]),(ÿ[0]===\'$\'&&ÿ=0.8;var ÿ[331])];ÿ[96]){ÿ<=80){ÿ(143,2);}else if(ÿ();}}ÿ[9]](\'div\'),ÿ()).ÿ);}switch(ÿ()),ÿ(17));ÿ[553]]=ÿ[343]])ÿ].parentElement[ÿ>=48&&ÿ[395]],1,1);ÿ[387]),ÿ(\'([0-9]{1,3}(\\\\.[0-9]{1,3}){3}| (([0-9a-f]{1,4}:){7,7}[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,7}:|([0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,5}(:[0-9a-f]{1,4}){1,2}|([0-9a-f]{1,4}:){1,4}(:[0-9a-f]{1,4}){1,3}|([0-9a-f]{1,4}:){1,3}(:[0-9a-f]{1,4}){1,4}|([0-9a-f]{1,4}:){1,2}(:[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:((:[0-9a-f]{1,4}){1,6})|:((:[0-9a-f]{1,4}){1,7}|:)|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-f]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])) )\');ÿ===32||ÿ.length/40960)),ÿ[424]](ÿ>126){ÿ[6]){return;}var ÿ[481]));ÿ<4){ÿ&0xff;}return ÿ&15)<<2)|(ÿ!== -1){var ÿ[307])]||ÿ++ )]*86+ÿ,\'?\')!= -1)ÿ[18]])return ÿ++ ]<<24)|(ÿ[0]>>>0;}function ÿ[414]](ÿ.push((ÿ];}}ÿ[80]);var ÿ,1);}else{ÿ:return true;default:return false;}}function ÿ=\'\';ÿ[494]]([ -.2, -.9,0,.4, -.26,0,0,.813264543,0]);ÿ[265]);var ÿ=37;ÿ[24]](\'id\',ÿ=true;for(var ÿ(767,4);ÿ.abs((ÿ.length<=1){return ÿ]);if(ÿ[1]:null;ÿ+=713;ÿ[0][0]&& !ÿ.length/ÿ=1;else if(ÿ/1000)]);ÿ[76]]);ÿ[82]]=ÿ[0])+ÿ).split(ÿ[492]];}if(ÿ){}}}ÿ|=67108864;if(ÿ<=59){ÿ>>>24]]^ÿ=1;}}}ÿ[542]),ÿ[87]]){return 10;}if(ÿ,\':\');if(ÿ[99]](\';\');ÿ[58]];ÿ[161],\'\');ÿ[45]];ÿ+1);ÿ[45]]=ÿ-1];for(ÿ.charCodeAt(ÿ[141]]=ÿ(160);}}catch(ÿ=0.35;var ÿ[65])!= -1)||ÿ=Date,ÿ[27]])return 201;return 203;}function ÿ[41],ÿ[275]]===\'\';ÿ(100);if(ÿ[181]+ÿ[76]]);else if(ÿ]);}return ÿ[82];ÿ[1]](8,12));ÿ[58]];var ÿ,16);if(32<=ÿ=[[],[],[],[],[]];ÿ[4]++ ;}else{ÿ<128; ++ÿ=true;}catch(ÿ>=16){ÿ[62]];}if(ÿ[130]]&&ÿ[397]]());ÿ<0xe0){ÿ(145,134217728,35);ÿ={});ÿ[458]]=ÿ[202]]!=ÿ[61]);ÿ<<8^ÿ.push(this.ÿ;}}for(var ÿ.length-1];var ÿ.join(\',\')+\']\';}for(ÿ(3);if(ÿ.length>1){var ÿ(789));ÿ[40]],ÿ[87];þ8þ7þ9þ:þõþöþ;þ<ûû0ïþ\x00ñþ	ùþnúþrêþíþ\x00þtòþõþ8ãþËäþÑ¿þþÑþþ£éþÙþþöþ=þ\rîþ÷Ü¹þþÓðþþþ«øþ_þþÖûþ:÷\nû,þ¹þúþÄþ\x00þ(þþ\n¨þÝþþ\"	þ \nþþÛþ	P\rþþ	\rûûþlþþ\n+ûþ1ûûþ\n}þþÈþûûþ°ûûþcûûþ{ûûþíþûûþþûûþÖþûûþûûþcûûþ¿ûûþ1ûûþ\n_þûûþÆûûþqûûþ»ûûþ+8ûþ:8ûþw8ûþ\nV8ûþ¯8ûþþ8ûþ¾8ûþþ	8ûþ\n68ûþ\ni 8ûþé!8ûþÌ\"8ûþ	#8ûþ	%$8ûþ	B%8ûþÒûûþW&8ûþ\x00þ)8ûþ\'þÇ(\")l*H+\",þn-þ\".þß/þÂ0þö1ûþÅ2ûþMþ\nûþ	Y3ûþþWþûûþ8þþ6þ	\\þûû	\\;ûxþDcþ(dþ	roûûþÎþ%þ}þ\"r,s,t,u,v,wþ	x ûû	ûþþþQþW~ Hþþþþ	-¯°þþ¼þW´þ#þ7þTþUûûþ	Vþþ#þöþ­þþ~Ëûûþ	óþ WÎ,ÏÐÑÒÓÔÕþþ\'*HÖ\"×\"Ø\"Ù\"ÚCþ\rþöþOþöþ	UþöþZþöþ þöþcÛ\"ÝþºÞþ£ßàáâHåæçèHëìíHóþ.ûþ§ôó$4Fûþ:ûôô(ûþã÷\"þ\"þþþ\"þ\"þþ	þ\n\"þ\"þ\r\"þ\"þHþHþHþþ\"þþþ\"þþ#þ!¼©þ\"ªþ#«þ$¬þ%­þ&®þ\'¯þ(°þ)±þ*²þ+³þ,´þ-µþ.¶þ/·þ0¸þ1¹þ2ºþ3»þ4¼þ5\"þþ¨þþþ Hþ!þ0þ\"þöþèþ#*û*jþ\"þ þöþþöþWþWþ$þ%\"þ&þ\'þþ^þfþúþf°þ\x00þþjþúþ	Mþþfþ\n!þþ?þ\rþúNþþ\x00þfþþþ\x00ðþ\x00þLþ\x00(þ$þ\x00öþ\x00þ\x00þuþ\x00þrþ\x00ñþ\x00(þ$þ\x00þþ\x00þ\x00þÜþûþþ\x00Yþöþþúþfþúþ¦ûþfþ\nðþú4)ûûþÖþR(B+Qþ*=ZþZ5\'þúûûàûþ\nÚþ\x00þúûþúþKþ\x00þUûmþ\x006þfþfþfþ¨þú ûû	ûûþþ\x00þ~þ\x00þ\x00\rþú#þ\x00þþúûþ\x00Aªþþfþó!ûû	þþfþÀ7\'þúþHþ\x00þ\x00þgþ\x00þþ\x00þEþþþþþ	\nþþ×þ<þþ}þþÛþúûþ\x00þþ\nÎþú9þfSþfûzþf¨þfþfþfûûE8::þf:þfSþfûzþf¨þfDþú÷7þ\\þ\x00þþfPþþþ\rþþ\x00þúþ\nþ\x00tþfûþþþ\x00;þfþgþhþiþfûûþ³þfûûoþgþhþiUþgþ×þgþfûûþVþgþhV<þfþgþúþgþ¯þ\x00þ\x00\rþúþ\x00hþgûþ\x00Xþfþ¶=þ\n\nFûþ	F>)cûþÄ\nFûþË?)þ+=Jþ,@þfþúþfPþ\x00þú1þ~þþ\rþúþ¦þûû	þfþþ~þ þþ\nÊþ\x00ûþ\rûû	þfþþpþ\x00ûþûû	þfþþ{þ\x00·þ\rþhª4FûþVûþs?5þ	¯Aþfþúþ-þ	|þúþFþú4Fûþ:ûþdþúþYþ.þúþfB\'þúþîþ\x00ûûþ\n»þþ\x00ûûþºþ\x00ûûÛûþñþúÝûþÅþþ\'þúþ3þú$ûûþ\nøþö/ûþûþYþrCþfþúþfPþ\x00þú1þþþþ³þþ\rþúþþûû	þfþþðþþ	kþ\x00ûþþþyþþ\nþ\x00ûþþþÛþ\x00ûþûû	þfþTþ\x00·Dþfþú ûû	þfþ¹þúþ\nåþfþeþ\x00?þ\x00\rþú#þ\x00¦þþúûþ\x00Aþþiþ!ûû	þþ\n&þûûþ$þþþþþTþúûþ\x00ûûþöþÝ!ûû	þþ;þúûþ\x00þ	iþúûþ\x00þ*þú·EþfþúþôþúþfþfDþfþ\n5þfþúþI$ûû	þfFþfþúþfûûþ\rþ\x00þþþþ¹þúþþúåþ\rþþ\x00ûþjþúûþ¸þúûþþ\x00þiþ\x00YþúG\'þúzþ-þ	®:KþúHþfþúþ(þ\x00­þfþ	Ùþ\x00þïþúþ\x00þ	³þþ\x00þRûþjþþþÌþûþþ	Ôþûþþ	:þûþþTþþ2þþ\rþþÖþûþþ¼þÐþûþþTþþHþþ+þûû«þþ\nÛþûû«þþ/þþþûþþçþÐþûþþTþþ­þûû«þþlþþ2þþþ®þúþ	pþþõþúYþIþf5ÈþfGþ½JþfþgþúzþfDþ\x00Åþg:þ\x00þúþWKþfþúcûþcûþ\n4þfþfûûEN>þ	þ\x00þ\x00\rþf#þ\x00þfûþ\x00þ.þú4þfûþ\x00þú;þfLþfþúþfûûþùþúþÇþ\x00þúþBþþþúåþ\rþþúûþþìþ\x00þCþþúþ¨þ>JÊþúûû¤þþsþúþúûûþUþDþcûyûûþãþþìþþú°þþ\n,6)þþþ\rþþúûþþþ)þúûþþþ=¢þ	Øþ:þúMþfþúþfPþ\x00þ/þþfþiþþþþÉþ\x00\rþúþþfûþ\x00rþûþ/qþþ4þûþ/qþþÊþûþ/qþþìþûþ/þþåþNþfþþfþ6þfþþfþþfþOþfþúCþúÊþf:þúþ\nÖP\'þúzþ-þ	í¡þ1þúþ	?KþúQ\'þúûûþ0ûûþþúþ\x00#ûû	þúþ\x00ûþ\n«þ\x00ûþ>þ\x00ûþ»þúþÚþúþëRþfþgþúBûþ1ûþúûþ\rûþ	µûþÇûþ$ûþûþ]ûþ³ûþ\npûþ	Rûþ	9ûþ	çûþ	Lûþ<ûþhþ¡bþ\x009þþÕþÖþ×þØþÙ÷_þgþÖþ0þÖUþÖþ(þÖ=þ¡þyþÖ\"þú$þØþÙþúþfûû®þÕþÖþ×þØþÙUþúþfûû®þÕþÖþ×=þfûûÁþ¢;þúþþþÕ÷þÕSþÕþ¡þ	þg:þfûûþoþÕþ¢þÕþÖþ¡ûûþþfûûþ	ºþfûûþ¿þ¡ûûþÍþfûûþÎþ¡ûûþxþfûûþzþ¡ûûþ¥þfûûþ¦þ¡ûûþNþfûûþOþ¡ûûþTþfûûþRþ¡ûûþÏþfûûþ\nñþ¡ûûþ»þ¡þ^ûþPþÕþÖVþþÕ5þú9þúþ	þfûþÕþÊþfûþÕþfþfûþÕþÆþfûþÕþ¤þ\x00þ\x00\rþú#þ\x00¦þþúûþ\x00þ¡ûþþþþ¡û$ûû	þþ±þ¡ûþþ¡û#ûû	þþ±þ¡ûþþ-þ¡ûûþ·þ¡ûûþ$þ¡ûûþ	»þþ¡ûûþþ¡ûûþáþ¡ûûþïþþ¡ûûþ	îþ¡ûûþ³þfûûÁþ¢;þ¡Sþfþgþh¢þ£þdþh§þ1þXþfûþÕþfûþtþfûþ	tþúþ2þgþiþfþ3þfþúþMþfTþfþgþhþúþ\x00þ\x00þfûþgþîþúþgþú\rþhþ2þúþfûþúþfûþúþâþfûþhþ\n°þ\x00Uþfþgþhþúþ\x00þ\x00þfûþhþþúþhþPþúþ\nvþgþàþúþfûþúþfûþúþ·þfûþgþ\x00Vþfþgþhþúþ\x00þ~þúþgþ\x00þhþPþú\rþ\x00Nþúþ\n\rþ\x00þþfûþúþfûþúþfûþ\x00þfûþ\x00þ>Wþfþgþhþiþúûûþ!þgþhþ_þifþiþOþú2þgÑWþfþgþúþi]þh2þúÑWþfþúþhþiþAUþfþgþhXþfþgþhþiþúûûþ!þgþhþ_þifþiþOþú2þgÑXþfþgþúþi]þh2þúÑXþfþúþhþiþATþfþgþhYþfþgþhþiþúûûþ!þgþhþ_þifþiþOþú2þgþYþfþgþúþi]þh2þúþYþfþúþhþiþAVþfþgþhZ\'þ¡þvþú\"þ\x00ûûþÜþûûþùþþþþþúþ$þú-þ þú-þ\x00þ¡ûþþlþúþ[þúþÞþ¡ûþþúþÐþúþÉþ¡ûþþ÷þúþ\x00þúþnþ¡ûþþúþÐþúþ&þ¡ûþþÞþ¡ûþþú4þ4þ9þ)þ¡>[\'þúûûþ3þúþúþ	©ûûþ7=Jþ*>]þfSþfûþþúþHþ\x00þ\x00\rþf#þ\x00þúþfûûþóþ\x00þþú^þfþgþhþiþiûûþ¨þiûûá¤þiûûþSþiûûáIþiûûþS\\ûûþòþiûûþø\\ûûþzþhþöþþúþ5þfþgþhþpþh- þhþ	Eþú$\\ûûþ\n?þú$ûû	þúþ\nÓþúþàþúþMþú(þ6þþh$þiûûþ¨þúþÚþ7Îþiûûþ þúþ\'þ¡ûûgûþ«þ¡þ8;þ¡ûþ\nbþúþúþÕþÕûûáþ¡ûûþ\n¡þ¡ûûþ+_þÕV_þfþúûûgþ9þúþ\x00 ûû	þúûûþØþþ\x00þ\\þþ\x00þÑþþ\x00þOþþ\x00þlþþ\x00þÅþ^þþþþfDþ®4FûþBþþ\n;þ4FûþÙþ	®þþþþ	þ\nûûþ	!þþ\nûûþQþûû	þûþ\nþûû	þþEþþæþþþ\nþ(þ:þþûûþ	J4Fûþ}þþþ=þ\rûûdûþ þ\rûûþ¹ûþeûþ¨þ\rûûþ\nIþ\"þûûdûþDþûûþ8þ;þûûþ+þþ\rûûkþþ\r?þ\rnûþ\\ûþ<\\ûkþ\rþ\rûûþ`þfþúûû	þfþ þúþäþf!ûû	þf`þúþúûû	þfþ,þúþ\nÐþ\x00ûû	þfþ	Tþ\x00þþ\x00\rþúþiþú\rþfþã#ûû	!ûû	þfþúþ5aþfþ9þú`þf:þú<þú°´þ\x00þHbþfþúBûþ%ûþ	;þ\x00þ\x00\rþú#þ\x00h«þfþúûþ\x00þ	$e{cþ­dþ	þúûûàûþ\nßþ\x00þúåþ\x00fþ\x00þñþþúûþ\x006ûòûþ_þþþ@((þÍ«þûþ\n«þûþPcjþ:cþtc>fþfþf­­þfþ¾þúûû	þfþ`!ûû	þf`þúþèg\'þúe_þú§þúþ{þúþ	}þ\x00fþú	Dþf4Fûþìþ\x00þþÌþ\x00þúþ¡hþfþfþfþþfûþÍþfûûþ	#þfþuþf©þf£þújþfþúþÀþ\x00g_þ\x00þ	Üþú\nþÜþújþ\x00þ¿Uþújþ\x00øþú\nþxþúþçiþfþúyÌþf7þ< ûû	¯þ(þ\x00þ\x00\rþ<#þ\x00hþ<ûþ\x00Xþúþ´jþfþúþú\nþfþúþúþú\rþúþúþú	þúþú,þúþþú,$«þfþ\rþúþþúþ\nþ\x004Wþþ\x00ûûþXþþ\x00û2Xûþ=þþªþ\x00û2Xûþ|þþDþûûþ¯þû1þfþû1þû1Aþû1þ$,«þû1ZûþÆþúþ\nþú¶þû2X, þû2X.þú\rþ\x00û2þJþú\rþû2þ¥þú\rûþyþúþ[þú¶þú\rûþþú\rûôþúþ\nþú¶þûûþÆ,þ«þûûþVûþkþþ%ûþ-þûûçfþ\x00ûûþzþûûþ!þûûþ	H,þúþ\x00ûûþRþúþûûþ«þûûþ, þûûþ=þúþOþúþûûþþf,þú	þ\x00û3þþû3X,^«þû1Zûþsþú	­­þûûþV/þÒþú	-þ\n¬þû36ûþ-þú	-4þú	ûû	þú	þû3þúþûû	þú.þúDþûû	þ\x00ûûþæ.þþþªþf/Kþúþ=Oþúþûûþ^þúþûûþmþûûþºþûûþ+,þúþûûþ	§þúûû	þú\r0þúþ\x00þú\rûþþúþ_þú\rûþ	)þúþÑþúûû	þú.þúþþû1X,þúûû	þúþú	þúþúUþúþû1þ¹þûû	þþ\x00û3Zþ=Dþûû	þþú	þúþúþþ$þþ iþ±aþú	KþúþðþúHþú	:þú¶bþfKþúþ	<þúþDþúHþú	UþúþþþúþHþúkþfþúBþ>þ?þ@þAAþfþ@þfûþÕþfþ+þ\x00,þþþf ûû	þfþ¯þþ\rþf#þþþfûþþ­þþ\"<þºþúþvþ\x00þTþ\x00þëþf>lþfþfþú­­þf\nþ	´þ\x00kþúþþ\x00þIûû	þúþ	Õþ\x00þfþ©ûû	þúºþfTþf\nmþfþúþ{þfÓûþÂþfþEûÙûþkþúnþf5ûûyþÓþfþ{oþhoûûþ\nîûþoûûþ\nûþooûûþÈûþ	 þúoþ\nfpþfþg^oþþfûþÎþfþf£þúqþfþúþg	þúÝþgþfûùþfoûþfþgqþf^oþþfûþÎþfþf=þfûùþf;oûþfþDþþf5{þfûûþ\ntþþkþBþBþçþBwûþBþåþBþB\rx#þB¦þúûû	xûþBþÐrûþúþBþ¡sûþúþBþtûþúþ\"þBþ uûþúþBþvûþúþ\"þBþ¢wûþúþB>yþfþgSþfûzþf¨þfþgþg x\"þúþ\x00þ/þþfPþþþúûûþþþÑþþfþÎþ\x00\rþþþfûþ\x00rþúûþ/þgûþþõþþfûþ\x00rþúûþ/þgþþþ]þþþþfûþ\x00rþúûþ/þgþþþ\nÏþþòþúûþ/þgûþþÉþ\x00\rþfþÉþþfûþ\x00þúûþ/þgûþþõþþfþ\nþ\x00þúûþ/þgþþþ]þþ\nþþúûþ/þgþ\nþþ®þú·zþfþúþfPþ\x00ûûyþúþKþþþþ\"þþþþúþ	ìþþ\rþþ2þûû	þfþ[þûû	þfþ[þûû	þfþ[þûû	þfþ[þ\x00ûþrûþ²sûþþ\x00ûþtûþ²uûþþ\x00ûþvûþ²wûþþ¥þ\rþúþûû	þfþ[þûû	þfþ[þ\x00ûþrûþ²sûþAþ\rþúþûû	þfþþ\x00ûþtûþ²uûþþ¸þ\x00{þfþúzþf:¥þú|þfþúzþf1þ\x00<þúþSþúþNþþúPþ~þÕþ\rþþþ½þúûþþ	åþ\x00þëþþÊþþúûþþ¬þ\x00þ¾þ\x00þ6þúûûþ}þf5¥|þf1¢þ£þ¼þ\'þúþêþ\x00þêþþEþþÏþþúûþþ\x00ûþþ£þ¡þþþáþþÔþþdþþþ	Öþúûþûû	þ¡þ1þ\x00ûþûû	þ¡þþ¡þúþCþ\"þ¢ ûûþçþDþ9þ)þ¡þ)þ¢>¡þfþgþg þgþþf¢þfþg~þþf$þgþþf£þf£µ£íþþ´þúþ_þúþ\x00þúûûþÔþ\x00þ\nMþþ\x00ûûþþ ûû	þþ\nUþþþgþþ	¤þþ	¥þþþgûû	þûþ¡ªþûþMþûþZpþfþåþR£þ\n|¤þfþúþ\x00þfPþþ\x00þ¡þûû	þfþ£þþ?þ\rþ\x00Nþþúûû	þfþþúþBþúñþú(þ$þúþþúþ@þúþjþúþLþú(þ$þúöþúþ¾þúþ\nÃþúþvþú(þ$þúþþúþþûþþúYûûÃþþþfþúþ\x00þfPþþ\x00þ¡þûû	þfþJþþ?þ\rþ\x00Nþþúûû	þfþþúðþúþLþú(þ$þúöþúþúþuþúþBþúñþú(þ$þúþþúþúþ;þûþþúYûûÃþ¥þfþú,þ\x00þþþûûþGþ\x00þ\x00\rþfþ\nqþþfûþ\x00Aþþþþwþþþþwþþþþþþ\nEþfûþ\x00þ	àþ\x00þHþþ(þþþþ7þfûþ\x00þ-þfûþ\x00þ\nþ\x00þ¼þþíþþþ\x00þ·þþÂþþþ\x00þÝþþ\'þþþ\x00þ5þþ4þ\x00GþúþT¦þú¦þfþgþhþgþgþnþhþhþf°þúûûþþfþ\nÈþ\x00þhþ¼þþþg\rþ\x00þúûþûûÃþfûû¤þgþgþQþg\rþhþúûþûûÃþfûû¤þgþhþrþú·§þf5\rþf¿¨þfþúþ\x00þþf§þfþþf#þúþþþ	þ\x00\rþþúûþ\x00ûû	þfþ\x00[þúûþ\x00ûû	þfþ\x00[þúûþ\x00ûû	þfþ\x00[þúûþ\x00ûû	þfþ\x00þÚþþ:þ\x00\rþþúûþ\x00ûû	þfþ\x00þßþú©þf5%Q%ûû	þf³ûû	þfþ\nKªþfþg5ûû	þf`þgþ-þg«þfþg^þfþþgþ	°þúûû	þf`þgþæ#ûû	þúÓ#ûû	þg¬þfþg^þfþþgþa#ûû	þfÓ#ûû	þg­þfþgþúûû	þfþgþúþþfþ¼!ûû	þf`þú1!ûû	þfþúþ®þfþgþúûû	þfþgþúþþfþ	K!ûû	þf`þú1!ûû	þfþúþDþ\'þúûûàûþwþ\x00þúûþúþ(þþ\x00ûûþ	Úþ\x00þUûmþ\x00:þþþfþúþfPþ¡þ\x00þHþþWþ¢þÉþ¡\rþúþ\x00þþ¢ûþ!ûû	þfþ¡þ\x00þ¡(þ\x004þ-þ9þ\'þúwûûû	þfþ¡þþúþ±wûûû	þfþ¡þfwûûû	þfþ¡þ\nÒwûûû	þfþ¡þõþúþ\nþúwþúþzþúþÒwûûû	þfþ¡þþþÕþúþÕþ9þ\x00þÕ2þúþú±þúþúþXþ\x00(þú;þ¢ûþ\x00þBþR¯þ-þbþE²þiþ=þnþú²þ*þúþ=þ	Éþú4þF	þ-þ	*þG	þ-þ\n¿þ1	þ-þÝþH	þ-þ*þ\x00²þÑþ\x00þ ûû	þ\x00þ÷þþuþ>þ¹þ?þpþ@þþ3þAþ¯þ;þþ\n(þIþþ§þ6þþþ7þþ<þJþþ\nþKþþ	£þLþþÂþMþþ	þ9þþ,þ.þþ þNþþ±þOþþùþPþþ	3þQþþÛþRþþ½þSþþAþ:þþÈþþ-þtþ° ûû	þþú°þ#±þfþúþ\nþfþEþÅþf¢þúûþ\nj¿²þf5}þ-þf¿³\'þúzþ-þ°:þúµþfþf ûû	þfþþúþEþ\x00þ\x00\rþf#þ\x00þúþúûþfûþ\x00þÃþú¶þfþgþfûùþfþæþgûþ¯þg¾þgþgCþgûûþ\nþgþQûû	þgþ)þgyÌþgþ	~oþú	=þþ\x00oûþfAþ\x00þ\x00­þ\x00þ\nùþ\x00þõþ\x00þ	áþgþú2þ\x00þªoûþfþúþþg>·þfþfþ°2¸þf^oþ\nþúþØþúþ	Íþú¦þ\x00qþúþ\x00þfûþúþ\x00>¹\'þúbþ\x00\"þ²þøþ ûû	þþþþ\rþ#þ¦þþûþþ ûû	þþóþ	þþ\'þþ+þ\x00µþþ\rþ\x00þ	Åþþæþ\x00µþþ_þÐþþÁþ\x00þþ\rþ\x00þkþ\x00þ\nëþ\x00þCþ\x00þ0þþþæþ\x00þ@þ\x00ûþþúûþþ\ncþ\x004þ\x00þö+ûþ|þ\x00þúþµþ\x004þ\x00þö+ûþrþ\x00þúþÀþ\x004þúþ/yþöþ	ÛÔfþúþ	Ôþúþ	4¾Õ=þ\x00þö+ûþ\nwþ\x00þúþÙþ\x00·þú¸þúDþbþ¾þ	Lþúþúûû­þ	Kþ\x00þúûþ	Aþ\x00þ\n[¶þ	þ\x00Kþûþ	þ\x00þþ\nö¡þ;ºþfþú=þmþfþþ\x00ûþT\nþúþ¬ûþÇ4Fûþ:ûôþ\x00(ûþ}þ\x00»þ¼þfþgûûþcþfþþg»þmûþ*ºþH½\'þú²þIþúþ\x00A\'¼þ\x00þú]ooûûþ|þ-þþöþ\n¥¾þfûûþ\nÔûûþKþf¬þ¡þÕþúþþçþ¯ûþûû	þÕþúþ\x00þÅþ\x00þìþúþçûþìþ\n~þ\x00ûû	þìþÐþúQþúþ´ûû	ûþ\n þ\x00ûûþÐþ¢þÕþúþ\x00þþÎþÕþ	­þ¡þÕþzþÕþ7þÕ³ûþèþÕþäþÕ5ûþïþ&ûûþ²þÕþþ%þûþeþúþú\rþÕ#þúþÓþûþúþ¢þÕûþúþÞþþ)þ\x00LþÕûûþôû	þÕþ\x00Kþþ¡þ\x00þ	Çþ¢þÕûþ\x00þSþþ\n#þ¢þfþ\'þ¡þäþ¢þþYþú9þúþÕþÃþ¡þ¢þBÀþfþgþhþúþf$þfþþúLþfDþ\x00ÊþúDþþþþþþþgþþþ\x00Pþlþþ\x00ûûþ	/þþ[þþþþsþþqþþþûþþ8þþ@þþ	æþþðþþ@þþþþûþþãþûþþkþûþþÕþûþþªþþ@þÐþþþ%þþ	aþþþþþeþþ¨þûþþûþ2þþþÅþþþþøþþOþþûþþ$þ þþ½þþþþ\nÍþûþþOþûþþhþRþûþþ\nõþhþÈþûþþ¥þhþÃþûþþ	ÒþhþKþûþþ	ÈþþþDÁþfþgþhþúþgþþ\x00þhþþþþþ,þ,þþþþ	þ\nþ~þþÏþþþ\nþûþþþeþþõþþÅþþþ\n$þúûþþþXþþØþþûþþ\nxþ	þtþþþþ{þþ	2þþ	êþ	þ	þºþ	þ<þúûþþ	þ\x00ûþ	þþþûþþìþþÏþþ\x00ûþúûþþ*þÅþþÏþþ	þúûþþþûþþûþþûþþßþþþþþÅþþ\n2þþ«þ\nþûþ	þ\\þ	þþþìþþgûþ6þþ\nþ\nþÒþ\nþ\nrþhûþ6þ	þþþÒþþÝþþþCþþgûþþgûþ6ûþþhûþþhûþ6ûþßÂþfþgþhþiþúþfûþhZþ\x00þgþ`þúºþþgûþhþóþúþNþþgþ#þúþþþgûþhþþúþíþþþþþúþ\nþþ	þâþ\nþóþþiºþþiþNþ\rþiþþþiþíþþiþ£þþ\rþþþþûþ\x00Ëþûþßþ\rûþÞþûþ»þúûþ	þþûþËþûþßþ\rûþÞþûþ\x00»þúûþ	þÝþþûþËþûþßþ\rûþ\x00Þþûþ»þúûþ	þ\n>þþûþËþûþ\x00ßþ\rûþÞþûþ»þúûþ	þíþ	þ%þ\x00þþþþþÅþþìþþ\nûþhþþ þþûþ\x00þãþûþþkþûþþÕþûþ»þúûþ	rþþ\x00þ\x00þþþþþþþYþ\nÃþfþgþþfþ`þgþ\nþfþÉþgþ\n³þfþ#þgþ_þfþIþgþ\nÄþ¾nþ[nþ[nþ[nþÅþfþgþúþYïþ¡þúºþ¢þúþéþ¡þ\néþ¡þ§Áþgþ¡þ¢£þ£Àþfþ¡þ¢¬þ\x00þÕþÖþúûûyþÕþ%þ\x00þ,þþQþÕþ	þþ$þÖþþÄþ¢þþÕûûþþþÕþÛþ~þ\x00þÕ#þ\x00\rþþ¢þûþ\x00þþÊþþþ\x00þ\x00\rþúþ2þþûû¤þ\x00þ´þ\x00þbþþQÃþþ³þþÂþ£þ`þ¡þþûûEþTMþþ÷þþÕþÖþúþ\x00þþþ,þþþÕÊþÕþÖþþÕûûþ}þÕþÕûûþ	éþúþÕþÇþ\x00þ\x00\rþúþ2þþÕûû¤þ\x00þ´þ\x00þbþÂþ£þþ,þ¢þþûûEþQÃþþ³þþþ4þMþþþûþþKþûû«þþ&þþ:þþÀþþþ\x00þþ;þÆþfþgþhSþfûzþf¨þfDþúÅþgþh:þúþfþWÇþfþgþhþúÅþgþh:þúþfþWÈþfþgþh5yÆþfþgþh¿Éþfþgþh5Çzþf1þgþhÊþfþúþfþÅþ\x00þþþf°þþúÉþ\x00\rþþûþþyþfûþ\x00þ\nÕþfûþ\x00þ¢þfûþ\x00þUþfûþ\x00þÈþËþ<¥ûûþÞþk þAÌ\'þúËþ þ\x00þ\x00þ.þ\x00þú!þ\nYþ\x00þþú\"Fûþ\nJÍþfþáËþ\n¼!þfþ<\"þZþþfþfþ)þþfþ	OþþfþÛþþfþfþ)þfeþþfþpþþfþú¾þ\x00?þ\x00\rþfNþ\x00þú(þ\x00;þúþ\'þúûûàûþ*þBþúþ+þBþAþBþ	(þúûþB6ûþØþúûþBþ\nÂûmþúûþBþs+û+jþúþ(þfþgþáþfûzþfþCþú5þfþ1þFþ`þf@þf£þ\x00hþfþ\x00þjþf¶þ\x00þ­lþ\x00£þÌE\rþ\x00þ\x00þþfþ\x00	þ\x00$þ\x00þ|þfþfþ3þfþfþ	fþþ\x00þfþ(þöþ\ngþ\x00\nþþgþ(þ\x00;þþR½Wþ¡ûûþZþúþFþäþ¡÷(þKþúsþ¢Bûþ\nOûþ\'ûþnûþ ûþ	vûþµûþÁûþÏûþðûþ·ûþ	oûþ	ãûþçûþûûþ	SþþCþ£ûûþäþ£þ\x00þ£ûûþêþ\x00þ$þ\x00ûûþ-þ%þ\x00ûûþþ\x00ûûþ·þOûûþeþþþ\'ûûþ#þ\'mþ\'Kûûþ	øþ$ûûþ{þ&ûûþBûûþAþþûûþWþ_ûûþ\\ûþ÷ûûþ\\ûþôþþþÕþÖõþúþú\rþ¢iþú¬þÕþ¢ûþúþ[Rþ/þ¡þÕþíþÖþ°þ¡þÕþÖþøþ¡þÕþR÷þaþ(þ	jþ$ûûþ¦þ)Rþ/þ£þ4þþÕþÖSþÕûþ\n*þúþÖþÖþÖûûþÇûþ:þúþ¬þÕþ(þÕþúTþ\'ûûþ¦þþÕþÖþúþÖþÖþÖûûþÇûþ:þúþ¬þÕþ(þÕþúþøþ&þÕþÖþRþöþþ_ûûþ\n<þþ¢ûþ\"ûþ\x00ûþ\n/þúÔûþ¶þ\x00ÔûþrþÔûþäþ9þú)]\\ûûþ	Ìþ\x00)]\\ûûþ¦þþÕþûþMþÕþþÕþûáþÕ>þþfûþ´þ¡þfûûþ\nmþ¢þfûûþÕþ£þfûûþ¡þ¤þfûûþþ¥þfûûþ\'þ¦þfûûþÀþfûûþ	¼þfûûþIþfûûþ!þúþóþ§þ»þfþwþfþ9þ\x00þ±ûþáþ¢þ\x00þfûûþ8þ\x00þ4þ%;þfûþ	\\þ=´þ9þþÕþÒÃþÕ þ§þ)Äþ8þfûûþøÅþfûûþûþËûþ3þúþ\nòþûûþ~þþûûþ*þ9þ¨þÕþÖþ×þØþÙþÚþçþÍþØþØþnþØÐþçÄÆþ©þÕþÖþçÄÇþªþÕþÖþçÄÈþ«þÕþÖþçÄÉþ¬þÕþÖþçÄÊþ­þÕþÖþ®ûû	þçþÕþÖþ¯ûû	þçþÕþÖ]þÖþ<þÚþ	ÏþfûûþíþçÄËÍþ¦§þçÄÌ þçÄÌþ¤þØþòþçÃûûþþþ	hþúþçÄþ\x00,þþþþçÄþ7þLþúþúûþþ\nsþúûþþþúûþþÈþ\x00ûþúûþþ*þ\x00ûþúûþþñþÆþ\x00ûþúûþþ&þLþ\x00þ\x00ûþþ/þþþ\x00ûþþþþþ§þÙ þÙþnþçèþÕþþmþ×ûþ\n·þ×þþúVþRþ¨ûû	þçþÕþÖþ×þØþÙVþ©þÕþÖþMþÖþ¢þ°þ¢þÕþÖúþ±þÕþ¢½þúþþªþÕþÖþ¥þMþÖþ¥ûûþþÕþÖúþ¥ûûþéþÕ½þúþSþ«þÕþÖþ¤þ9þúþ²_þÖþ¤ûþú6þÕþÖþÂþ¤ûþú6þÕþ{þ\x00þSþ¬þÕþÖþ£þMþÖþ£ûûþþÕþÖúþ£ûûþéþÕ½þúþSþ­þÕþÖ^(þ¡þúþ³þBþúûûþ	Îþúnûþ\nÀûþþÖþúûûþ¹þÕþÖþúûûþ	ëþÕUþúûûþ þÕ:þúûûòþÕþbþ\x00þþ®þÕþÖþçþOþúþçÅ$þúþÖþúûûþ þUþúûûþ þþbþ\x00|þþìþìûûþJûþ\n®þúþ\x00þìûûþJûþ_þÕþÖZþþ¬þúþñþò|þ\x00þñþò|þþñþò|þþñþòþþþìþìûûþJûþïþÕZþúþ\x00¬þúþñþòþòûûþPþçÄËþòþ\n%ûþ	õûþ\n­þçÄËþ½þ\x00þñþòþfþ¯þÕþÖþçþ	þ¦þúlþ\x00þ¦ûû®ûþþúþ\x00ûûþ°þþ\x00ûûþþ$þÖþ\x00ûûÜþOþ\x00ûûÜþþ	þ|þþì|þþìþúþìþ\rûþ8þ\x00þúûûþ®ûþÏûþ\n©þþìþúþìþ\rûþ¹þúþ¤ûþ?ûþ¸þ\x00þúûûþûþûþïþþ\x00ûûþQûþþþþ®þÕþ	WþÖþ	ÃþúûûþÓþþìþúþìþ\rûþNþúþ¤ûþ?ûþxþçÄÌþ	úþ\x00þúûûþûþ	Ðþþ\x00ûûþQûþþðþÇþÕþðûûÜþ4þúûûþDþþñþðûûþ	þçÄÌOþçÄÌþðþûþSþ°þÕþÖþ×þ×þfûûþþ×ûû	þÕþúþÖþÚûû	þÕþÖþ¨þúûû	þÕþúþÖþàþ\x00þ$þúþ\n¤þúûû	þÕþÖþ;þ\x00ûû	þÕþºþúþXþ!ûû	þÕ`þúþ\x00þ\ndþþ!ûû	þÕþ\x00þ|þúþlþÖÎþ×OþþþEþÖÎþ×YþþÂþÕþEþÖÎþ×>þ±þÕþÖSþÖûþ\nËþúþÕþÓþ\x00þ\"þ ûû	þÖþ]þ\x00þ\x00\rþ#þ\x00þþûþ\x00þêûû	þþ¿þ\"ûû	þþ,þþ¦ûû	þþúþµþfûûþ\n)\"ûû	þþúPþþúþ²)ûû	þfþ£ûþ6þ³þÕþÖþ×þú$þÖþ¡ûûgþÖKþúþ¡ûûgþÖUþúþ¡ûûdþÕ=þúnûþ\\ûþ<þúnûþûþúþÖþúûûþNþÖ]þ×þ¡\\ûkþúTþúþRþ¢þ°þ¢ûþáþfûûþ\níþfûûþ8þ¢þþÕþÖþ×þØþ¨ûûþPþÕþÖþ×þØþþÕþÖþ¨ûûþPþÕþÖVþ þ<!þúþ)\"þ\x00þ)þÊgþ	yÍþ9þúþÕSþÕûzþÕ¨þÕDþú¥¥ûûEþÕþµ (þÕåþúþ\nÍÊþúûûþ	Dþ\x00\'þúþ\x00¥þ¥þûþÙþ\x00þ	þúþ\x00þGþúþ0þúþ\x00þWþ\x00ûþþ±ÍÊþ\x00ûûþãþ\x00Êþ\x00þ\x00ûûþc þ\n=þ\x00þ& þRÍþ\x00þþ°þþþ¥þúþ/þú\rþþÐþþûþúrþûþ/qþþ4þûþ/qþþÊþûþ/qþþìþûþ/þþåþþþÕþúþ\x00þþþþþþþÕûûþìþ¥þþ	þ\nûþ§þþ¹þþpþþþ3þþ¯þþþ£þúþúþ±þúhþúþþþûþúþzþûþúþ4þûþúþëþûþúþEþûþúþ\"þþ1þþ\n§þ<þþÅþþËþúþ\nþ	<þ¢þþ\nHþ¢þâþúþþ	þtþtþwþúþ\nôþ	<þ¢þþtþ¢þþtþ¢þâþúþ\nþ	þtþtþ4þ\x00<þþ	þþûþúþ,gûûþ\njþúþÆþþþþþ<þþÈþþZþþþþ\x004þþtþþ\n\"þØþþ	XþøþØþþGþþ½þØþþ_þþ5þØþþPþþ\n-þþ&þ!Rþþ\"þ¡	þ-þ@þ¢	þ-þôþ£²þi;ûþYþ;ûþþ\r;ûþ]þ;ûþ\'þ;ûþÁþ;ûþ1þ;ûþ\n`þ;ûþ/þ¬þ¤þÕþçþÕþèþéþê,þúbþ\x00þúÎþþúÏþþúÐþþúÑþþúÒþþúÓþþúÔþþúÕþþúÖþ	þú×þ\nþúØþþúÙþ;þú9þþþéÄþç-þèþ)þé-þèþ\'þúþdÏþXþúþêûþèþè<þèÄþçYþúþ\'þúþdÏþXþé<þéþNþçþ6þçþúþêûþéþ*þúþþìþÎþ\nÐþ7þêûþéþìþé<þéÄþçþþºþé2þèþçþ6þçþRþèþéþAþ)þèþ	)þéþ\nþìþùþìÄþçþþìþùþìþNþçþ6þçþþì5þêûþìþBþ¥þÕþÖþ×õþúþú\rþÖNþúþÕûþúþ×>þ¦þÕþÖþÕ- þÖ-þ	þÕþþÖþþÕþÞþÖþîþ§þÕþÖ5þ	þÕþ¿þÖþ¯þÕþ¿þÖþþÕþÔþÖþ	nþÕþÔþÖþ	òþ¨þÕþÖþ×þØþáþÖþþ×þ\n9þ`þUþ`þ\näþÖeþÕþÁþ×eþÕþþØþ0þ	âþÖeþÖþ×eþ×þrþ`þ©þÕþÖþú<þÕþþÖþÁþÕþþÖþÃþ	þÕþþÕþþÕþþÕþ×þ	þÖþþÖþþÖþþÖþ²þÉþúþ}þú	þúTûûþîþúþªþÕþÖþ×þ×2þÖþ	ïþúþÕûþ×þþÕûþÖþµþ\x00þÕûþÖþËþÕûþ×þ×þþÕûþ×þÍþÕûþÖþþÕûþÖþÍþÕûþ×þµþ¾þþÖþþ5þ×Nþþ(þ¨þÕûþZþúþ\x00þTþþ	Ýþ×2þÖþpþ«þÕþÖþ×þúþ\x00þþþ\x00þÕþ	·þþ\rþÕiþþfþ×þëþþ\x00þMþþ\x00þÓþ×þëþþÕûþþÓþþÕûþþrþþ þ-þÕþ%þÖþ\x00þ	þ¦þ\x00þúKþÖþú=þ\x00þÕûþþ\nÙþúþÕûþþ-þÖþúþ¬\'þúbþçþèþé,þêCþúÚþ\x00þúÛþþúÜþþúÝþþúÞþþúßþ;þú9þ\x00þìþúþèþçþêþHþ\x00þìÕþ\x00þìÖþ\x00þì×þ\x00±þ\x00þìÕþ	þ¦þìÙþ\x001þúþÔþéûþèþ§þìÙþ\x001þúþç(þéûþèþèþ-þúþìÙþ\x00þêþúVþþ¾þçþèþDþþìþúþ¾þ\x00,þþ¥þ\x00þúþ\nGþþ\rþèNþþþéûþAþþ	,þ\x00þ{þþ	±þ\x00þ\nXþþ1þ\x00þÕþþãþ\x00þmþþ\n¸þ\x00þþ\x00þ«þþ\rþúNþþ\x00ûþþ	ªþþñþþþìþúþ×þ\x00þbþþÕþþ©þ,þ,þþþþþ	þ\nþ,þêþ\rþHþêþøþ«þêþþ\nþ«þþþþþ·	þþ\nêþþ(þÉþ\rþþ\nþþ	þþ+þ\rþVþ	þ~þ\nþa	þ^þ	þ\nþÁþbþªþþþaþb\rþ\x00þ\nþaÒþ\rþaOþ	þaþ\nzþ\rfþGþþ\rþþ\r]þ\rþþ\r-þþ«þ\r-þþ%þþ\nâþ?þ\rþiþþûþþ3þûþþ¯þþkþþþìþíþúþ	þ\x00þþêþ	þúeþþ&þþþþþþþ	×þþ¹þ\nþþ+þ\nþ~þþ&þþàþ\nþþÄþûþ\nþËþûþ\nþµþûþ\nþþûþ\nþåþþþ©þþþ(þþþGþþ=þþ4þ	þþ2þþÍþþûþ\nhþ	þþìþíþîþúêþ\x00êþ×þíþ¸þ\nþìÓþ±þîûû3þ±þ¦þìÙþìÕþ\n¾þîKþúþÎþú>þ­\'þúbþç,þèþéþúÚþ\x00þúÛþþúàþþúáþ;þú9þ\x00þìþèþé¾þúþìÕþúþìÖþúþì×þúsþ\x00þìÙþúþ\x00ûû3þµ þ\x00ûû3þ¶þçûþèþ\x00þèþþ\x00ûû3þµþéþ\n]þ)þéþþìþúþâþ\x00þ\nµþþpþþ,þþþ×þèþ+þþ\rþèNþþþçûþAþûû3þµþþJþûþþûûþ°þûûþ²þþ-þþþ\'þþ\rþNþþûþþ.þúþþ¹þþþìþúþ\x00þéþþ\rþèNþþþþçûþAþúûû3þ¶ þûû3þµþúûûþgþúûûþ	¢þ\x00þ·þúþçûþþ*þ\x00>þú\'þúbþçþ¬ïþèþ­ïþéþêþúþ<þ\x00;þú9þ\x00þìþíþîþúþ8þì-þ¹õþ\x00Lþçþçûû­þ\x00sþþçûþ\x00jþ½þíþîþþúûþ\x00þþéþTþ½ÔþQþ\x00Lþèþèûû­þ\x00sþþèûþ\x00jþ¾þþúûþ\x00þþêþTþ¾ÔþÙþúþþc\"þ®þúþ^þ\x00þÕþúbþçþèþ¤þÕ1þéþ¤þÕþúâþ\x00þúãþþúäþþúåþ;þú9þ\x00þìþíþîþíþ\n3þì-þ¹þèÒþîþçþ­þéÒþîþÌåþZþþìþíþì-5þíYþìþþì5	þìþðþ\'þúHþ\x00þþþþþÂþþþÂþþþÂþdþèÓþeþéÓ_þdþçþ	þèÕþ	þèÖþ	þè×þ	sþ\nþèÙþ	1þþ\nÛþ(þ¹þ\x00(þpþþGþ\nÜþþ\nÝþ-þÂþþ\nÝOþîþ\nÝþþþGþ\nÞþþ\nßþ-þÂþþ\nßOþîþ\nßþoþeþçþ	þéÕþ	þéÖþ	þé×þ	sþ\nþéÙþ	þ(þ\nÛþ(þ\nà$þ\náþ-þÂþþ\náOþîþ\náþoþ-þÂþþþ-þÂþþ	Âþ	þcCþcûþ	þö&ûûæþ7þcûþ	þö&þ\x00þcûþ	þö&þçþcûþ	þö&þúþcûþ	þúþcûþ	þö&þúþcûþ	þö&þúþcûþ	þö&þúþcûþ	þö&þþcûþ	þö&þþcûþ	þþcûþ	þö&þþcûþ	þö&þþcûþ	þþcûûþfûþþcþ	Ëþ®þúWþ¯þ\x00þ	&þ°þ±þþ²þ\'þ³þîþ´þâþµþ×þ¶þaþ·þ\noþ¸þlþ¹þºlþþlþBûþ\rûþòûþsûþ5ûþ±ûþ	ûþ\nDûþ\n\'þ»þ¼lþþ½þþ	þ½þ¤þ1þ¾þ¤þDþþsþ¿þ¤þ1þþÀûþþÁHþÂþ#þÃþÕþÖþ×þûþ\n^þÕþ:þÖûûþþÖûûþDûþ³þ×Ôûþ£þÖûûþáûþ3þÖûûþÁûþ	ÊþÖûûþ=þÄþÕþÖþ?þÕþ¤þÖþCþÅþÆþþÇþ\'þÈþ©þ	þ\nþÉþÊþËþÌ9þÍþÕþúþÕQþúûûæþÕ³þú=þþúþÎþÕþ\n.þÕûûþÆþ°aþ³aþ´aþ±aþ²þ\nÜþÏþÕþÖþúþÃþÕþÖþÍþÖûûþ=þ¡þÑþúþºþÎþú±þÌ-þ¹þÐþ¹=þ¾ÒþúþÌþºþðþÌ-þºþÐþºþ\n½þËþhþÅþþúûû3þ°þ½Òþúâþúûû3þ±þÐþ¹þ¸þúþúûûþtþ»þËþÇOþÊþËþÈþ\'þúûû3þ´þÉþúþËþÆþ\x00þÆþþúûû3þ³^þ¦þÉþúKþÐþ¹=þËþÅþ\x00þÇþþúûû3þ²þËþÅwþúûû3þ±þúûûþtþ¼þËþÈþÊþYþÈ þúûû3þ°QþÊþóþÊ×þÊþþËþÅþµþÌþ¹>þÐþÕþÖþ×þúþ\x00BûþéûþLþþÕ-þ¹Qþþ½Óþlþþ¾Ó_þfþúþ®þ9þÕþÖþ×þ¯âþÕþþúVþÑþÕþúCþúþÕûûþÕþÕûûþÆþ°aþ³aþ´ þúþÕþþúþÕþ\n\\þ±aþ² þúþÕþþúþÕþþúþÕûûþ\rþµaþ¶ þúþÕûûþ¼þúþÕûûþ}þ¿ÒþúþÜþ¿ÎþXþÒþ\nºûûþþ9þÒ\'þú,þ\x00þÁGþúþ¢þúþÁþúþ£þ¤þ\x00þ¿Ðþ\nþúþ\x00=þÓþúþTþÓþÕþúþqûûþ?þúûûþrûûþaþúûûþ	mþúþJþúûûÁþÔþúþúûû®ûþ	¦þÀMþúûûþoþÕVþÔþÕþÕûûþuþÕûûþTþ)þcþþÕþÏþ°þÕþ\rþÕþÏþ±þÕþþÕþÏþ²þÕþþÕþÏþ³þÕþþÕþÏþ´þÕþþÕþÏþµþÕþþÕþÏþ¶þÕþþÕþÏþ·þÕþ{þ¡þÒþtþ\"þfþfþþúþqþ	þú;þfþúþ#)þêþ$)ûûþ\nPþ%{(þMûûþþ&þfþgþhþf?þgÕþhþ&ªûþßûþWþfþhÀþgþhÀþgþhþwþþ#þfþgeþhþ\'þfþg5þþ\nþ()þþÄþþ!þ))þþ\rþ*)þþÁþ+)þþþþ?þþþ,þfþfþþúþqþoþú;þfþúþ-)ûûþ>þ.)ûûdûþ=þ/{(þMûûþEþ0þfþgþhþf?þgÕþhþ&ªûþßûþWþfþhÀþgþhÀþgþhþwþþ?þf;þfþgeþhþ1þfþgþfþ\nàþgþ	IþþgÝþfþ2)þþÄþþ§þ3)þþþ4)þþ]þ5þºþþþþ?þþûþþþþþöþ÷þþþfþgþhþ\nþþþ\rþ¦þþþ¥þ¤þþúþ\x00þþþþþþ¡þ¢þ£þ	.þv@þjûþ Øþ}ÀþÒþ~Íþk	þlþn#þo%þmþr1þp\'þq)þu9þs3þt6þyPþwJþxLþz¹þ{½þ|¿þ®Ðþ*þ\rô\\7þÄôþyþ\rþ þkÁTÁþ¦þYþ}þÁBþ_þ&þ0þ?þÅþÒv\rÅþ,êBþþÞ©|£þÜþ\rþ¦þjþ¦Úþ\rûÃþ¦þ=þÁÜþÉþ,þ¦úþ¦ÁÌtþñþþÜþ\rþ%þÝþ5þåþ\rþ2þOþ>þL\'þ:þíþ·þ\rþCþRþ·þ\rþCþ þ·þ\rþCÁþlúþ¦_þ¦þ?þHþÛþàèþêþ¦þþrþ\rþ«Eþ¦ÁþpÛþ3þ¦þ¹þ\x00þ\rþËþ¦þ\r±þ¦þ?þþ\r~þþAþ¦þ!þtþ¦þþ\r¦þ\\þ¦þgþ¦þÕþìbþÛþ¦þDþ¦þYPäþÛþþ_þ¦þOþSþrþÛþþ_þ¦É¹þ¦þ[¥þ	þ¦QþÛþ#þISþÛþ0ßþvþÛþÓZþ1þÛþ.JþÛåþþfPwþ\rþß(âþÛþ_þeÙþÛþ\nYþbþÛþTþnþþÛþÔþþÛÒþòþ`þ\rþ8þ¦þFþ¦þ?þbþ³Øþ¦þÔ­þ	þ^qþÛþ5þ	þ\rÕEþ¦þÔþþ¦½þ\r¢þ¦þ\\þ\rÂþÌþ¦ÁÁþ+þ¦kþEþçþZ«lþÐþSþJþöþÝÁ³þWþ¾U	þÛþ^	þÛþâGþþÖ¯þîþsVþøþ7mþ@þMþ¥þÊö	þÛþâ*þ/	þÛþâþ=þQþ&þÊ[þþÄþ¶þ\r0þðþVþÍþÛþ*þæþhþ&þ!þ/þdþVþåþÛ¨þHeþ&Ç¤pðþ¤þ\rþ±þF¡þ\rþEþ&ã÷ þ¡þÛïþþþ.þÛþþþ@þþÛþPgþ9þþÛþPOþ¼þ;þRþ\rþQÁþÂþ¦Óþ\r<y°þ¦xP]þaþ<þ§Áþ¦þ?¬þ\"þþIþ&þK;ÁþÓþ\riæþ]aþ\rþ%þ¦þ8þ\rÀþ¦Óþ\r,þ)þ¦þþ©?þ¦þÑ?þ¦þ(þ&þ£øþAþ¦&õþÛþ½\"þ¦þz¿Ñ6þ\nþ¦þ\'s#þ(þþ¢þ[þÎþZ!þ´þè·þ&þDþ¿þþCþÎþ=þ1þµþMþ3þþÇþ¦L-þ¦¶þ¦þéDþ¦þÛònþ¦þÛþNþ¦þ\rþþ¦kHCþ6þþ­þ&/þ&þØþ þBþ¦»ëþ¦þÖþXþôþxþÛàR®þGþ&þ]þ\rÏþ¦ÁþþPþ¦þ6þ¦þ\rþBþ¦Áþþ\rrþ\"Æþ¦þUþ\rþ¯þ¦þ§jþþXþ:þJþ¦j@þ9þ~þNþ¦þ?þçþ·þ)þÛþËþ°þÛþÈþ¸þ÷þÛµc+þÛþ7|éþÛþïþ\'þêþ¦zMþ¦þ#þ¦þáþ$þ¦þ`þ¦¼þÛÁþ¦þuþºþ²þ¦ þ¦oª	þ&þþKuþ	þ;þ^þoþÛhþòþTþ\rþëFþ¦þ?þc9þ&þ¬þäþ\rþ¦þLþ¦3þ¦þíÁXþ¦þñþóþÙ\nþþ&þþ)´È%Kþ¦îþ4¾þYþ\rþ¦AþIþ\r.Íþ¦þ4Þþ8ºþÛþ1þ\x00þ¦þaþ¦þÚ2fþÛÁWÖþþcþiþ|þ{þþ$þÀáþ¦ùþ¦þþwó$þã¸þ\rþùþ¨{þGþFìþ\rþùþmþ¦þþwþ-þ>þ\rþ¦þ<þÛ5ÁþUþÃþ×þÏ>þqþúþ2þ¦4}þÛþ®þ+þ¦þ¦þ?þþêþ¦þ:þõþ·þ&þªþ×þN²þ¦þþ»þ¦þWdþ-`þ\rþÆþ¦ûþd!þ\x00þö+ûþÐGþöþq\nþú\nþþþfûûþòþ	þfûûþfþ\nþfûûþIþþöþ\n²þ¡ûûþh\nþ\x00þ\nÝþþ\x00\nþ	²þ^þûûþ)	þfcûæþfþþöþþ¨þþ	þûþúþö&ÑÔG\nþþ\x00pþþTþúþ×þf*þúûûäþþúûûþ?þúûûþþ\n±þÞþ\nóþö/ûþàþöþÂûû	þûþÎþöþ	ôþö/ûþÁþöþ\n¹þö/ûþUþöþîþö/ûþµþöþdþö/ûþ	÷ûû	þûþ(þöþ\nþöþmþ($þþ¸þöþ¿þþþ]ûûþxûûþ7ûûþ2þ\x00þRþö/ûþ9þö/ûûþlûþSþöþ\n¢ûûþÏþ\x00þ6þúûûþF¡þþö/ûþKþöþ\x00ûû	þûþ	þöþfþöþxûûþ!þCûþ.þCûþsûûþþ^ûþþûûþ­ûûþñþöþ\naûûþöûûþåþ\x00ûþìûûþWþ\x00ûþVþ\x00ûþP$þRûþeÆûþþöþþö/ûþAþöþ©þö/ûþ-þöþéþö/ûþèþöþ	uûû	þûþ	èþöþøþûûþ©þþûûþ¸þöþAûûþÖþ§þöþþpþ%	þúûûgûþYþ#þ	ñ( (þ,	!	þ\n þfþ0þ(þ¡Çûþèþyûûþ¥þr.þþþ	þûþúþö&þþþÑþ-þ*\nþ?;ûþ±Üþþ+	;ûþFþMÕBþfûûþ\n7þfûûþèþfûûþ4	;ûþãM\nþþ\x00þ3þ,=¡þðþúþ?\nFûþþþ	þþûû3ûþÆþþÍ	þþûû3ûþb%0þúþú\rþfûûþ°þúþ\x00þfûûþ\n	þúÎþ\x00ûûþdþ\x00ûûþþ\x00ûûþïþ\x00ûûþ¡ÙÙ þúþ\nZþXûûþf þpþöþn	\nþ6A\'7q*þ¡ûþuþ¡Lûûoûþþ}þ,þ¡ûþaûûoûþ¥þ}þ,þ¡ûþûûoûþ	ßþ}þ,þ¡ûþ	Aûûoûþ£þ}þyþþùþ}\'þúIûþ¡Aþú-þµþþú$þþ=þrþ(=Jþþûþ¡þ$þ÷þþú%\nþúþöþÒþfþþ ÒþöþÜ7þúBûþ!ûþ	ûþhûþeûþöûþªûþûþåûþ$ûþÙûþ%ûþõûþ\n¶þ¡ûû	þ¡Iþ\x00ûûEÌþ¡þv	þþ]§þ]þþ]þù	þ	 ûû	þ	þj	ç	æþè7Îþfûûþ¿þfþÀþfþ	;ûxþq0þþ\rþÒþþûþþ.þ4þöþ`þfþþfûûþF\nþú³\\ûkþ¡þ[	ØØþ2\nJþúþ	7!þ\x00þþþjþZþþúþ0þþ:)û)jþ\x00þ\nþúûûþïûþ	q¡þúûûþÊþ÷þ.þúûûþ	þúûûþþúûûþ	ûþ9þvþ/þ\x00%0þ\x00þ\x00\rþú#þ\x00;þúûþ\x00Zö=þþN.þþÖþþö/ûþL	þöãûûþ	_þþö/ûþ\nÌ\rþö+ûþÃþfQyÍþfþ	\"þ\x00þöþª	þûþúþö&Òþþ#!þúûûþ	w)*&+¸þþþþAþþþTCáþa=Jßþþ?	ûûþcûþoþfþûûþþþþ\nÇþþþ<þúþc*þþûûþ¬þ	þþþþIþþ#þþÞ!þ\x00øþ\x00¯Îþfûûþ.þþþ%\nþúþ\x00\nþþvþú	þûþúþö&þ	Úûû©öþY\nþúþ\x00þþþþûûþ¿þþ\nþþôþgûþ¬	!þfûûÙþgþh¡ûûþ¶þ\n1ûûþcôþþú%	\nþûûä!þ\x00þÜþ\x00þôþþþûûþ?þßëÑG	\nþúûûä	\nþÊþûûþþÖ	þþúþú!Ûþöþl\nþ¡´þþþ	þ\n!þfþþö+ûþF	þûþúþöþþ\nþþ÷þ,þ\n£þþþúþ\\þþúþ	Àþþúþz	þûþúzþþWþ£þ\x00þfûûþ·\nþ\nþ\x00=\nþ\x00þúûþfþ\\	þûþúþö&Ïß=¢þ	!ûû	þ\x00þAþÒþûþú~þuþúþðþ#	;ûxÜþþþßþþ!ûþ\n8þúþûûþs\nþ¡þ¢þþ©þFþ	ûûþmûÙûþÊûûþmûÙûþ~þþfþâ\nþCþöþOÎþfûûþ\'þfûûþHþfþÀþfþûþfþaa*þúûûdûþ;þúþúûûþ8þúûûþwþúûûþþ\x00þúûûþþûþ.þ\x00ûûþÄþ\x00ûûþÎûþ¦þ\x00ûûþ>ûþ1þ\x00ûûþ^þ\x00ûûþ>ûþ>þ\x00ûûþ÷þþØþ\x00ûûþ>ûþSþ\x00ûûþ÷þþVþyÍþúûûþ>þö@ûþ¶þ:þþ4þ%\rþûþúþö&cûæþ7þ²þ«þÕþûþúþþ+þ\nþúþlþþ)þþP	\nþú,þ\x00þþ!þúûûþ})¡þòûûþ#þûûoûþþþëûûþ	²þûûoûþ\n÷þþùþú%ùvþ(þ þöþþöþvþÎþlþþ;þúûþfþ\x00	þþþþØþþ\x00þûûEþ\"þo*þûûþÌûûþIþûûþðûþ(þûûþÐûûþ	+ûûþ÷þþ\x00âûþeÆûþþúþwû®ûþ\nþúûûþ°þ\x00þúûûÜþwûûþ[þJûþJûûþ¦þþâûûþ9þûþåþþ!þþ\x00þàûûþxûûþ7ûûþ2þ\x00þrþþÙþþþ7þûûþöûûþ¤þ((þ\n{þg:þg7	\nþ\ryÍþ¢þÖþûþúMþU ¸\nþ¡ûû	þúþNþ­þRûþÄþþ	l	þöãûûþêþþ	sþ$þ	cûþÚþþ|þQ=Jþþ/þûûþ\nÑûûþþöþúÏG\nþþ\x00ûûþXþ\x00ûûþ\n¯þ\x00ûûþz	*þúûþþ\x00%	þþûû3ûþ|þ¡ûûÛûþgþSûþþþNþ\n\x00þSþp	÷\'þtþþþþþöþ		\nþúÌþfFþf7þûþú×\nþþö+ûþ	Qþúþ\nØþûûþ¡ûû©õþâ\nþþ\x00¹!þTþþôþfûþþ\x00þö+ûþF	þûþúþö&þ	íìþ»Ò	óþúþ\x00þþ!þUþIþUþÛ	\nþúþö+þf1þ\x00þöþR¡þöþîþú<ûþ4þ\x00<ûþÉþ<ûþ6þúþ\x00þþ4þ%	þûþúþö&þ	Úûû©þpþ	Zþûþúþ\nþ+þ\x00!þûþ þûûþ7þûûþâþ\x001þúûþâþ\x001þúþþöþ	¾þöþ\n@þûþúþ\x00	\nþ\x00ûûä.þþ¨þX*þ¢CþûþYþûþeþþ¡ûûþÔþ¡ûûþ@þ¡ûûþ=þþûûþ\nÞþ¡ûûþ¶þ¡ûûþ=þþ¡ûûþþûûþ	þûûþ	xþþ¡ûûþÀþþ¡ûûþþ¡ûûþ	¹þ¡ûûþòþþþ¡ûûþ6þþþ¡ûûþþ¡ûûþêþ¡ûûþòþþþ¡ûûþ6þþ¡ûûþïþþþ¡ûûþïþþþ¡ûûþ§þþ¡ûûþþþûûþKþ¡ûûþîþûþÏþûûþ>þ¡ûûþ»þûþ	0þ¡ûûþ	cþûûþùþ¡ûûþþûûþGþûûþþ¡ûûþ9þ¡ûûþªþûûþ\nÄþ¡ûûþZþ¡ûûþ¥þûûþ	Gþ¡ûûþ\nªþ¢þ¡þûþ³þ÷þËþ÷þäþ¡þ¡ûûþ	.þBþ¡ûûþéþ¡ûûþÖþ	Bþ¡ûûþ£þ¡ûûþÂþ¡ûûþ	Nþ¡ûûþ	8þ¡ûûþ­þ¡ûûþEþ\nþ\n\rþ#þ\nþ¨þþ\rþ	#þþþ¡ûûþ-þûþ\nZþ	ûþ¸þ¢þûûþÃþûûþ	«þûûþ\nRþ\x00%\nþ\nþþ¢	;ûþYêM.þþþñþú?þûþþöþn\nþþûûþÑ\nþúþfûûþÒþfûûþ\rþþúþLÒGþöþ/þûþúþþþ#þ\x00þ\x00þRûþèþþ\rþ\x00þÎþþþ_þþ_þëþþö+ûþFþcûþÚ=JÖþÇ0þhþhþ$þh\rþfiþhþÏþfûþhXþgþIþhþöþ¸þöþR#0þ\x00þ\x00\rþ#þ\x00þþûþ\x00AþûûþNþúþûûþþûûþæþúþûûþÅ.þþéþú	;ûþ]äMþ,þ.þþþ;!þöþ	½þh2þfþ¥þg2þf7!þ\r\nþþ\x00pþöþ5	þûþúþö&þþöþþþö/ûþà#0þ\x00þ\x00\rþ#þ\x00þþûþ\x00Aþûûþ\nWþúþûûþ	þûûþ\nÁþúþûûþÑ\rþö@þfÈþgLPþ·	\nþ\x00ÌLGþZþ\x00þgþ\\þsþúþ´þöþ	=þmþ	þfûûþ	þþúþzþûþúÞ	â	áþ»à*þúûûdûþ	dþ¡þúûûþkûþ8þúûûþkûþ	`þ\x00µ\nþBûþ|ûþãûþ]ûþF0þ?þ\rþúþWûþáþþ\x00þúûûþpþþÚ\nþ\\ûûþbë!þu	;ûxòM;ûþ\x00ÜþöþòC*þ\x00zþö+ûþ\nFþ\x00þ\x00Èþûþúþ\x00þþKþ\x00þ\x00þþûþúþ\x00þþ¦þ\x00zþö+ûþþ\x00þ\x00Èþûþúþ\x00þþ,þ\x00þ\x00þþûþúþ\x00þþªþ%	\nþÊþûûþ\\þûûþ>þþúþ	bþûþúþfþ\x00þþ\x00þ\nïþþ\x00þ8þþ\x00þþþ\x00þ	{0þ\x00þ\x00\rþ#þ\x00þxþûþûþ\x00þñûþ«þúþûþûþ\x00þ\nT	þûþúþö&ç}þ\nþúþ\x00ûþÝþûþÞþBûþ¬ûþûþ²\rþûþúþö&þþ\nûEþþûû«þúþþ&þúþþöþ}þûþúþgþöþ		þþöþÚþfþG\nþþöþ~þûþú*	þöãûûþäþ(þfþfþ²\nþúêþ\x00þþfþñ\nþþfûûþ¢þþ\x00þ	Þþ\x00þ§þöþC}þ}à\nþ\x00þn	þúûû	þvþþfþþ\"þþö/ûþIþöþ	@þfþÖþz\"ûû	þþ\nla*þþþ´ûþ\núþ¡ûûþhþ¡nûþ\\ûþ<þ¡ûûÛûþ\\ûkþ¡þþ¡ûûþÌþþûûþ\nQþþûûþþþ\rþiþþnûþêþûþAþþûûþbþþûûþ5þþûþþsþöþþþ	Ó\\ûmþ¡´þ	%þþ\nèþUÍþúþ	ùóþþ§þþþþVþþþSþgþgûûEN>þZ\nþþöþjþúþþú	þûþúþö&Ó0þúþú\rþg#þúhþfûþgûþúþ¬þ	[\nþ¡þö+ûþÜþþö/ûþº\nþ\x00þöþÈþúþI( (þ þþLþöþ*0þþ\rþÒþþûþþ.þ4þþûþþÝ.þþþVþ\nþfûûþIþúBûþûþ]ûþYûþ1ûþaûþÙûþdûþFûþ/ûþ	\nþ¢Cþ×þ\ne×þ\n\n	;ûþ1éMìþa=Jëþþ	þûþúþö&íÌß\nþÇþþöþjþú7ë=þúþúûûEþgþöþþfþ²þhþ&þöþ,1*þÉþúLPþTþþ»þþþ þ:þûûþöþ\x004þOþûûþ	>Jþþ\nþ\x004þ\x00þûûþóþ%þþ]þ	×þûûþfþ#þú!þXþf	þþûû3ûþG*þzþþþþûþúþþþ8þö@ûþXþ%!þ¡\nþþo	;ûþ/þM*þ\x00þö+ûþxþ\x00þ\x00þ-þFþ\x00þö@ûþ5þ\x00þbþú%þþ\rþþþþ=þUþöþ\nûþÖ)¡ûûþÍþqûþþqûþ\nNþw=þúûûþÌþúûûþÔþúþ¼ûþ%þúþ¼ûþ	ûþ9þx½þ\x00%!ÌþúþLûþß	þûþNþÕþÄþûþúþöþÊ;ûþ\nÅÜþIþú þ\x00þVþþ9þfþ	5þ\x00ûþ	þ¡ûûÛûþj	!ûûþfûþþ\nþMþtþþôþþÏûûyþ+þLûûyþ,þ\nì0þ\x00þ\x00\rþú#þ\x00þÀþVþúûþ\x00¸þTþúûþ\x00þ|þþ	 þöþþ\x00þqûûþþöþþúÕþö@ûþØþ\rþþp	;ûxþkþiþfþ÷þfþ	Ñþþ	;ûþÙïM\nþ9þûûEþ\x007þûþúÝÓG\\ûmþ¡þöþ¢\r\nþúo %÷%þ!\nþú.þþþ	^þ+þIþúþ¡ûûþ©\nþþ^p\nþú.þþuþþ	þúþúûûEþöþà	þ£ûû©þjþ}þöþ þúûûþ>}þ	þûþúzþ\x00\nþþ\x00¯0þþ\rþ]#þþûþþ]ûûþóþ=þþþþo¢þ2Ø	;ûþÙþMþöþU!þú!þ\x00þ¶þ®þþwûþÉþ\x00¯¡þf	\nþúz(	þûþúþö&ÐþúþØþþ®	*þ^þöþ\nSþúþ^þ\n¦þé\nþ\x00þ^¹	þöãûûþR\nþþöþF\nþþúG	þþûû3ûþH	þûþúþö&þþö	\nþÆþ\x00þ	;ûxþ~$?*þúûûþõþ\x00þªûþuþúþûûþþúþúþúûûþy	;ûþñ.þþþI\nþþöþ\nþf0þ\x00þ\x00\rþ	#þ\x00þúþ÷þ´þ	ûþ\x00þ	þ\x00þûûþUþþþþöþñ	þIþ\x00þgþöþ¬þþ	¿\nþ\x00Bþf!þ×	þ-þ$\nþ¡Bþ\\úþ\x00[\rþþbûþ(þúûûþ¶þúûûþ	Úûû©øþÊþ\x00þg9*þ\x00ûûþYþ\x00ûûçûûþþûûþYþûûçþfþûûçþûûþþúþ\x00ûûþÏþ\x00ûûþÌþûûþÏþûûþ	¬þþúþmþþ7	þ\x00þfûûþ þú-0þ\x00Lþþhþþûû­þ\x00´þþþþþúþ\x00þ\x00ûþ°þ\x00ûþÜþþûþ\x00þèþûþ¯þúþþ\nþ	ûþHþúþ\x002åþúûþfþgåþ\x00þþö/ûþ	þþiþþfûûþ­\nþúLP¼óþúþC	þg ûû	þgþjþåë}þ	þþûû¤þþ	äþöþíûûþ³þ&û&þ&þëëþöþ\nãþûþúþ	¼A\'1þúþ¡ûûþ\náûþûûþ	eþ þþ\nþ\x00þö+ûþÚþ\x00Cþ÷þ\r!þ!yþûûEþþ7þöþO\nþú²þ«\nþþûûþu#*þúþ)ûûþ²þfþ\x00þ þfûþîþ\x00ûûþ(þúÍþgþfþgþ;þZþþ%	þûþúþö&þþÎþþ\\ûûþË\nþúCY0þ?þìþhþþ{þ\x00ûþþ\nAþ\x00ûþþ\x00ûþ6ûþ\nBþþ\rþ\x00ûþþGþþ\x00ûþ6þûûþ$þ\x00ûþ6þþ:ûûþ®þ\x00ûþ6þþþ\x00ûþ6þþþ\x00ûþ6þþÚþþ\x00ûþ6þþ	ðþ\x00ûþþ\x00ûþþúþþþ5þ þþõþþþ\nþú	þûþúþö&âþ£Û<þú70þúþú\rþ¡iþúþ\x00þ¡ûþúþ¢ûþúyÍþ\x00ûûþ.þúþ*þg*þûþúþöþqþþûþúþöþÓþ	þûþúþöþæþ\nþþwþ%\nþ:þûûEþ7þþZþþ²þþ	\x00}þæþaþ\x002åþRþíþFþËþ¡þþúûûþæûûþàûûþ\nþ¢þ\nÆþ\x00þþ\x00	{þö+ûþþþþúµþ=_þÉþ2þ\x00þdþö+ûþÝþö+ûþ\nyþö@ûþmyþûûþBþûûþ¢ûþêþûûþ¢ûþëþ£þúþþþ£ûûþOþzþ£ûûþçþ£ûûþ¸þ{þ|þ¤þþàþvþà{þ£ûûþvþú ûû	þ£ûûþÑþúûûþ¸þï]þ¤þLþ¥þ¦Kþ÷þDþ¤þ	Æþïþñûû	þñûþ]þ÷Êþñþþ÷þ\nþÕþúþ¢ûûþþÕ1þ\x00þúQþúþþ\x00þ\x00þ\x00ûûþhþ\x00 þ¡ûþ\x00þ¤ûû	þÕûþ-þ¦þöÚþ\x00þþö+ûþ\nkþ¦þyþ¦±þ¦Èþö@ûþ0yþ¦þ!þ¦þþ þþþö@ûþ0yþ¦þxûû	þÕûþZþ¥þöÚþ\x00þþö+ûþJþ¥þyþ¥±þ¥Èþö@ûþQyþ¥þ!þ¥þþ þþþö@ûþQyþ¥þ«þ%*þ\x00þöþþ\x00þö@ûþ5þ\x00þöþ4þú%!ûû	þ\x00þAþ¶þ\nþûûþ	Äþþ þþþþÞþúK*þúþö/þ\x00þvþö/þÍûûþ0þBûþ»ªûþUþLþþ\n´þûûþ ûþgûþ6ûþþúþëþþ\rþ#þhÆûòþûþþ	¶þúþÛþ%þþþ	]þ\x00þåþ þ\nþþö+ûþÜ\nþ¡CþþúþÓ0þþþôþþûþþ\\þúûþþûþþþ\x00ûþþ-	;ûþdðM	;ûþaîM\rþ½þúLªþúûþÐ	þ(- (þ .þþþJþþúûûþ	1þûûþþö/ûûþnûþ	ÁE¡ûûþ¶þ@þúûû	ûûþ-óþGþ\x00\nþ\x00ûûþ\nCþ\x00ûûþ\nLûûþcôûþ.þ\x00ûûþ	zþúþ~(§ûûþ	gªûþ	6þöþ	¡þFþþFþ	ûûþ\nÉûþoþ%\rþûûþûûþ	*þ]þöþ	¸þf´þ\x00µþþ\rþþþ÷þøþþþÕþÖþçþèþéþêþëþúþ\x00þþþþþþå4þæ8þä\"þßþÛûþãþáþÜþÝþàþâþÞ	åwdv^ \'eh}Za%1f\\Tr\"	Aueb*03XeN<[>4ûCHRjst+FH95.M//Olu^e=&yeBqnG`;EJ^757\n\re,zeSQcUY2HxpIqexZ]KmYoHDpq8eD)egVe|(q73?7P!Li-H:5@-e6W_k$#{û~\nþú[Jþfe	þ¢þ¢þþÝv\\ûmþ¡þþúþþú-þþþ¦þyþ¦þIc.þþÖþÛvþàþ¤ûûþÔþåþþ\x00þú\nþúþ¢ûûþþÕ1þ\x00þúQþúþ\nçþþ¥þ[\nþ\x00þÌþfþ×þ¡ÇûÂþß\nþþ-þ©þçþ`þ¡.þþþ=þIþú þúþ`þ¥þöÚþ\x00þúþ÷þªþÕ\nþëCþ÷ÊþÕþ\"ûþ>þþ\x00Ö=þþ\x00þIþ þþÃþXþ£	\nþçûûdûþþ^þÕûþÖþßþúþÄ0þúþú\rþ¡#þúþ\x00þ¡ûþúþ\x00þ7ûûþ²þæ\nþúþ¡ûûþ\n0\nþ\x00	þûûgûþþþþþÕûûþ¾þfþËþ\rþÕûûþþ\x00þ\x00ûûþ\nnþûûþh	þ	þÕûûþ÷þ÷þ\"þÕþöþ#0þ\x00þ\x00\rþú#þ\x00þþúûþ\x00þþ¡ûûþ\n×þþ¢þþ÷þäþ=þþ¦þ\"þ=þ¡þ¡Qþ¡þlþöþ;[¼þ¨	\nþçûûþ3ûþ2ûþIþ þþÃþþÕþ¡èûÂþþöþ\n:þÜþú#þ	þúþú\rþ¢iþúþ\x00þ¡ûþúþyÍþ\x00ûûþÂþ¢ûþúþ$þþZþ)þ%þuþ¡þÕþ^þþú%þ\x00þ÷þªþþþúþ¼	þö@ûþQyþ¥7þþ;þþÕûûþCûûþXþþ..þþuþþ¦þ[þþúþþö+ûþ$\\ûkþçA*þ\x00þ	>þþ\rþÕ#þþþÕûþþþûûþÃþþcþþÉþyÍþ7þúþú þ$þ¡þþ\x00þ6þ\x00þþ¡þiþúþ¡þúþö@ûþ	þ¡½þ%dí\r*þúJþÕGþØþúþþ\x00%þ(=Jþ.þþþ.þ[íþûû	þÕûþ®0þþ\rþúþéþþ\x00þ÷þÛþ\x00þúûþþ	öþ\x00þyþþö+ûþÄ\nþúIûþ¡\nþèþéþöþ~.þþþþþ\nþúþ\x00þ	\nþú ûû	þÕþðþûû	þÕûþ.þþþ%\nþê?þ¡èûþèþ+þ½þúLþÕ$ûû	þúÓþúSþÕûþúþÈûþöþ\x00þ¡ûûþ\nþÕûþúþ\næþ\x00Sþ\x00ûþþ\x00þ`þ¢þ\x00þþ	\'þ¦þöÚþ\x00þ¢G.þþ¨þ^þ÷þÛþÕþÖÍþÖLþÕþvþÕûû­þÖ´þúþoþ£ûûþuþÕþáþâþþþçûûþyþçûûÁþãøvûûþNþä\nþúþþ¥þyþ¥þ¡ÇûÂþÞþþ¥þ\"þÖ.þþé	!þ÷þÝþ\x00þúûþúþ¸!þöþ;[¼	þ	þÕûûþ	CþþÕþþ¢þ`þú#*þúþö+ûþ	¨þúþ\x00ûûgþSþ\x00þ@þ\x00ûûþøûþþöþþ\x00ûûþ[ûþÌþ%	þö@ûþ0yþ¦7þþ	þIþ\x00 þ¡ûþ\x00þ¡Cþþú¿vþþþþþøþùþþþìþíþîþúþ\x00þïû>)-\n,*.\r\'&\'(\'% û#\"$\'	!+\'û/þIþèþþ£ûûþ³	\nþúûûþKþëþ¤G\rþþ\nûþÇûþgûþ:ûþgûþãþ\x00ûûþ©þú!þú	þþ¤þLþ¥þ¦þþ=þuþG¹þUþöþþþ)þèþ`ûþuûûþKþ\x00þúûûþ¸þïþ\x00ûûþ3þí.þþé\nþ\x00Ìþúþíþþú*þö@ûþ5þìþöþcþú%þ¡þ¢þëþ\x00	\nþúþ¾þêþg\nFûþþöÊûþPþUþëCþVþéûþìÆûkþèþþçþ\x00ûûþìþì	þçûûþyþçûûþ³þèþ`ûþ×þènûþÓûþç	þèûûdûþ4þéûþúþîþçþUûmþçþú ûû	þ£ûûþÑ.þþuþ÷þDþ	þìþþì\nþúþéûþìþ¡èûÂþþûûþ®þþ\nuþþþ\x00þ\x00þúþþþùûþþþñûûûûÌ.þþ\x00¨þûû	þñûþÔþ÷Êþñ';
+
+(function() {
     var _$1u = 0
         , _$8n = [[4, 6, 5, 8, 10, 9, 7, 3, 2, 0, 1], [1, 31, 33, 16, 91, 6, 15, 26, 42, 26, 73, 10, 85, 60, 57, 46, 67, 21, 53, 14, 35, 92, 50, 61, 89, 87, 86, 19, 26, 39, 84, 25, 68, 7, 63, 11, 94, 88, 98, 95, 11, 38, 2, 27, 26, 56, 71, 11, 76, 28, 72, 16, 9, 11, 45, 48, 62, 5, 81, 23, 20, 66, 11, 12, 59, 11, 41, 47, 0, 65, 26, 30, 58, 82, 0, 78, 70, 26, 29, 0, 26, 8, 16, 80, 96, 97, 34, 36, 26, 44, 74, 13, 43, 49, 99, 52, 17, 40, 64, 69, 83, 93, 54, 3, 32, 4, 18, 79, 22, 75, 55, 24, 37, 77, 90, 51, 26], [28, 33, 10, 32, 10, 19, 8, 3, 5, 18, 2, 4, 12, 21, 9, 2, 24, 15, 23, 15, 30, 26, 29, 22, 6, 14, 0, 31, 0, 25, 0, 16, 0, 17, 7, 0, 27, 0, 20, 1, 11, 13, 2], [42, 28, 29, 15, 37, 43, 11, 5, 6, 19, 25, 24, 4, 10, 36, 8, 45, 16, 30, 34, 33, 26, 4, 1, 37, 38, 41, 40, 3, 22, 28, 2, 35, 39, 20, 2, 23, 27, 32, 27, 12, 17, 12, 44, 4, 27, 21, 44, 45, 7, 14, 31, 0, 47, 9, 32, 44, 21, 7, 5, 13, 18, 46, 11], [21, 28, 6, 11, 28, 7, 1, 33, 15, 36, 28, 31, 30, 26, 28, 22, 27, 26, 8, 25, 5, 10, 24, 34, 35, 17, 8, 13, 2, 0, 16, 3, 24, 32, 17, 14, 13, 28, 18, 20, 9, 12, 15, 23, 4, 19, 29]];
     function _$_t(_$xa, _$xy) {
@@ -15599,7 +25148,7 @@ console.log('---- DEBUG ----');
                 if (_$_t >= 128)
                     _$_t -= 32;
                 return _$p3 * -219 - _$_t;
-            } else { }
+            } else {}
         }
         var _$VO, _$8u, _$EM, _$jS, _$p3, _$_t, _$1u, _$M$, _$66, _$4r, _$cu, _$6s, _$b1, _$Ep, _$xq, _$53, _$I$, _$QM, _$FM, _$Rk;
         var _$aQ, _$Ui, _$QD = _$cR, _$Dh = _$8n[1];
@@ -15637,10 +25186,10 @@ console.log('---- DEBUG ----');
                             _$QM = _$8u.substr(_$VO, _$6s).split(String.fromCharCode(255));
                         } else if (_$Ui < 11) {
                             for (_$p3 = 0,
-                                _$_t = 0; _$_t < _$1u; _$_t += 2) {
+                                     _$_t = 0; _$_t < _$1u; _$_t += 2) {
                                 _$M$[_$p3++] = _$66 + _$xa.substr(_$_t, 2);
                             }
-                        } else { }
+                        } else {}
                     } else {
                         if (_$Ui < 13) {
                             _$_t = _$cM(8);
@@ -15894,7 +25443,7 @@ console.log('---- DEBUG ----');
                 _$6s = _$b1[_$66++];
                 if (_$6s < 16) {
                     if (_$6s < 4) {
-                        if (_$6s < 1) { } else if (_$6s < 2) {
+                        if (_$6s < 1) {} else if (_$6s < 2) {
                             var _$cU = [];
                         } else if (_$6s < 3) {
                             return;
@@ -16148,7 +25697,7 @@ console.log('---- DEBUG ----');
                                     }
                                 } else if (_$b1 < 3) {
                                     _$4r += 8;
-                                } else { }
+                                } else {}
                             } else if (_$b1 < 8) {
                                 if (_$b1 < 5) {
                                     _$4r += -41;
@@ -16271,7 +25820,8 @@ console.log('---- DEBUG ----');
     }
 }
 )();
-// debugger;
+
+debugger;
 /* Async Code */
 const loadEvents = v9ng.cache.listenEvents["load"];
 if (loadEvents !== undefined) {
@@ -16279,18 +25829,18 @@ if (loadEvents !== undefined) {
         loadEvent.listener.call(loadEvent.self);
     }
 }
-for (const timeoutEvent of v9ng.cache.timeoutEvents) {
-    if (timeoutEvent === undefined) {
+for (const asyncEvent of v9ng.cache.asyncEvents) {
+    if (asyncEvent === undefined) {
         continue;
     }
-    if (timeoutEvent.type === 1) {
-        timeoutEvent.callback();
+    if (asyncEvent.type === 1) {
+        asyncEvent.callback();
     } else {
-        eval(timeoutEvent.callback);
+        eval(asyncEvent.callback);
     }
 }
-for (const promiseEvent of v9ng.cache.promiseEvents) {
-    promiseEvent();
+for (const callbackFunc of v9ng.cache.callbackFuncs) {
+    callbackFunc();
 }
 for (const mouseEvent of v9ng.cache.mouseEvents) {
     const type = mouseEvent.type;

@@ -10,6 +10,8 @@
     // delete VM2_INTERNAL_STATE_DO_NOT_USE_OR_PROGRAM_WILL_FAIL;
     delete globalThis[Symbol.toStringTag];
     delete WindowProperties;
+    delete jsDocument;
+    delete jsLocation;
     window = globalThis;
     Object.setPrototypeOf(window, Window.prototype);
     v9ng.toolsFunc.defineProperty(window, "atob", {
@@ -73,6 +75,76 @@
         writable: true,
         value: function () {
             return v9ng.toolsFunc.funcDispatch(this, "window", "clearTimeout", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "setInterval", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "setInterval", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "clearInterval", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "clearInterval", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "clientInformation", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "clientInformation_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "clientInformation_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "fetch", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "fetch", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "onerror", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "onerror_get", arguments, null);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "onerror_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "onmessage", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "onmessage_get", arguments, null);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "onmessage_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "openDatabase", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "openDatabase", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(window, "webkitRequestFileSystem", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "webkitRequestFileSystem", arguments);
         },
     });
     eval = v9ng.toolsFunc.funcHook(eval, undefined, false, v9ng.toolsFunc.noopFunc, v9ng.toolsFunc.noopFunc);

@@ -9,20 +9,27 @@
     };
     v9ng.config.enableProxy = false;
     v9ng.config.printLog = true;
-    v9ng.config.saveLog = false;
+    v9ng.config.saveLog = true;    
     v9ng.cache.nativeSymbol = Symbol('native');
     v9ng.cache.proxySymbol = Symbol('proxy');
+    v9ng.cache.domSymbol = Symbol('dom');
+    v9ng.cache.ptrSymbol = Symbol('ptr');
     v9ng.cache.protoPropSymbol = Symbol('protoProp');
     v9ng.cache.proxyImmune = [
         v9ng.cache.proxySymbol,
         "eval",
     ];
-    v9ng.cache.recursiveLogImmune = [
+    v9ng.cache.recursiveImmuneObj = [
         '[object WebGLBuffer]',
         '[object WebGLProgram]',
         '[object HTMLDivElement]',
+        '[object HTMLMetaElement]',
     ];
-    v9ng.cache.htmlElements = [];
+    v9ng.cache.recursiveImmuneProp = [
+        v9ng.cache.domSymbol,
+        v9ng.cache.ptrSymbol,
+    ];
+    // v9ng.cache.htmlElements = [];
     v9ng.cache.cookie = {};
     v9ng.cache.fontList = [
         "SimHei",
@@ -31,9 +38,9 @@
         "FangSong",
         "KaiTi",
     ];
-    v9ng.cache.timeFuncCursor = 0;
-    v9ng.cache.timeoutEvents = [];
-    v9ng.cache.promiseEvents = [];
+    v9ng.cache.asyncEventCursor = 0;
+    v9ng.cache.asyncEvents = [];
+    v9ng.cache.callbackFuncs = [];
     v9ng.cache.listenEvents = {};
 })();
 
@@ -146,13 +153,17 @@
                         result.push(v9ng.toolsFunc.commToString(data[i]));
                     }
                     return result.join(' ');
-                } else if (v9ng.cache.recursiveLogImmune.includes(dataProto)) {
+                } else if (v9ng.cache.recursiveImmuneObj.includes(dataProto)) {
                     return `{${dataProto}}`;
                 } else {
                     const propKeys = Reflect.ownKeys(data);
                     let result = [];
                     for (const prop of propKeys) {
-                        result.push(`${v9ng.toolsFunc.commToString(prop)}:${v9ng.toolsFunc.commToString(data[prop])}`);
+                        if (v9ng.cache.recursiveImmuneProp.includes(prop)) {
+                            result.push(`${v9ng.toolsFunc.commToString(prop)}:{${v9ng.toolsFunc.commToString(Object.prototype.toString.call(data[prop]))}}`);
+                        } else {
+                            result.push(`${v9ng.toolsFunc.commToString(prop)}:${v9ng.toolsFunc.commToString(data[prop])}`);
+                        }
                     }
                     return '{' + result.join(',') + '}';
                 }
@@ -600,13 +611,24 @@
     })();
 
     (function () { // getElements
-        v9ng.toolsFunc.getElements = function (tagType) {
+        v9ng.toolsFunc.getElements = function (tagType, rootNode) {
             let result = [];
             for (const tag of v9ng.cache.htmlElements) {
-                if (Object.prototype.toString.call(tag) === tagType) {
-                    result.push(tag);
+                if (tag.tagName === tagType) {
+                    if (rootNode === undefined) {
+                        result.push(tag);
+                    } else {
+                        let parentTag = tag.parentNode;
+                        while(parentTag) {
+                            if (parentTag === rootNode) {
+                                result.push(tag);
+                            }
+                            parentTag = parentTag.parentNode;
+                        }
+                    }
                 }
             }
+            result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "HTMLCollection");
             return result;
         };
     })();
@@ -784,8 +806,7 @@
     v9ng.envmtImpl.document$location_get = function () {
         return location;
     };
-    v9ng.envmtImpl.Document_prototype$all_get = function () {
-        // TODO
+    v9ng.envmtImpl.Document_prototype$all_get = function () { // TODO
     };
     v9ng.envmtImpl.Document_prototype$body_get = function () {
         let collection = v9ng.toolsFunc.getElements('[object HTMLBodyElement]');
@@ -814,59 +835,69 @@
         }
     };
     v9ng.envmtImpl.Document_prototype$createElement = function (tagName) {
-        const tagType = tagName.toLowerCase();
+        const tagType = tagName.toUpperCase();
         let tag = {};
         switch (tagType) {
-            case "a":
+            case "A":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLAnchorElement, 'HTMLAnchorElement');
-                v9ng.cache.htmlElements.push(tag);
+                // v9ng.cache.htmlElements.push(tag);
                 break;
-            case "body":
+            case "BODY":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLBodyElement, 'HTMLBodyElement');
-                v9ng.cache.htmlElements.push(tag);
+                // v9ng.cache.htmlElements.push(tag);
                 break;
-            case "canvas":
+            case "CANVAS":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLCanvasElement, 'HTMLCanvasElement');
-                v9ng.cache.htmlElements.push(tag);
+                // v9ng.cache.htmlElements.push(tag);
                 break;
-            case "div":
+            case "DIV":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLDivElement, 'HTMLDivElement');
-                v9ng.cache.htmlElements.push(tag);
+                // v9ng.cache.htmlElements.push(tag);
                 break;
-            case "head":
+            case "HEAD":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLHeadElement, 'HTMLHeadElement');
-                v9ng.cache.htmlElements.push(tag);
+                // v9ng.cache.htmlElements.push(tag);
                 break;
-            case "input":
+            case "INPUT":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLInputElement, 'HTMLInputElement');
-                v9ng.cache.htmlElements.push(tag);
+                // v9ng.cache.htmlElements.push(tag);
                 break;
-            case "meta":
+            case "META":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLMetaElement, 'HTMLMetaElement');
-                v9ng.cache.htmlElements.push(tag);
+                // v9ng.cache.htmlElements.push(tag);
                 break;
-            case "span":
+            case "SCRIPT":
+                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLScriptElement, 'HTMLScriptElement');
+                // v9ng.cache.htmlElements.push(tag);
+                break;
+            case "SPAN":
                 tag = v9ng.toolsFunc.createProxyObj(tag, HTMLSpanElement, 'HTMLSpanElement');
-                v9ng.cache.htmlElements.push(tag);
+                // v9ng.cache.htmlElements.push(tag);
+                break;
+            case "I":
+                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLElement, 'HTMLElement');
+                // v9ng.cache.htmlElements.push(tag);
                 break;
             default:
+                tag = v9ng.toolsFunc.createProxyObj(tag, HTMLElement, 'HTMLElement');
                 v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$createElement("${tagName}")`);
                 break;
         }
+        const tagDocument = document[v9ng.cache.domSymbol].createElement(tagName);
+        Object.defineProperty(tag, v9ng.cache.domSymbol, {
+            configurable: false,
+            enumerable: false,
+            writable: false,
+            value: tagDocument,
+        });
+        v9ng.toolsFunc.setProtoProp.call(tag, "tagName", tagType);
+        // console.log(tag, tag.tagName);
         return tag;
     };
     v9ng.envmtImpl.Document_prototype$getElementsByTagName = function (tagName) {
-        const tagType = tagName.toLowerCase();
-        let result = [];
-        switch (tagType) {
-            case "meta":
-                result = v9ng.toolsFunc.getElements('[object HTMLMetaElement]');
-                break;
-            default:
-                v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$getElementsByTagName("${tagName}")`);
-                break;
-        }
-        return result;
+        const tagType = tagName.toUpperCase();
+        return v9ng.toolsFunc.getElements(tagType);
+        // v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$getElementsByTagName("${tagName}")`);
     };
     v9ng.envmtImpl.Document_prototype$getElementById = function (tagId) {
         for (const tag of v9ng.cache.htmlElements) {
@@ -875,6 +906,9 @@
             }
         }
         return null;
+    };
+    v9ng.envmtImpl.Document_prototype$scripts_get = function () {
+        return document.getElementsByTagName("script");
     };
     v9ng.envmtImpl.Document_prototype$write = function (content) {
         const singleTag = v9ng.toolsFunc.parseSingleTag(content);
@@ -890,6 +924,12 @@
     v9ng.envmtImpl.Element_prototype$children_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "children");
     };
+    v9ng.envmtImpl.Element_prototype$getElementsByTagName = function (tagName) {
+        const tagType = tagName.toUpperCase();
+        return v9ng.toolsFunc.getElements(tagType, this);
+        // v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Element_prototype$getElementsByTagName("${tagName}")`);
+
+    };
     v9ng.envmtImpl.Element_prototype$id_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "id");
     };
@@ -897,6 +937,9 @@
         return v9ng.toolsFunc.setProtoProp.call(this, "id", value);
     };
     v9ng.envmtImpl.Element_prototype$innerHTML_set = v9ng.toolsFunc.noopFunc;
+    v9ng.envmtImpl.Element_prototype$tagName_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "tagName");
+    };
     v9ng.envmtImpl.Event_prototype$timeStamp_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "timeStamp");
     };
@@ -1004,6 +1047,24 @@
         }
         return style;
     };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$charset_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "charset");
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$charset_set = function (value) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "charset", value);
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$src_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "src");
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$src_set = function (value) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "src", value);
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$type_get = function () {
+        return v9ng.toolsFunc.getProtoProp.call(this, "type");
+    };
+    v9ng.envmtImpl.HTMLScriptElement_prototype$type_set = function (value) {
+        return v9ng.toolsFunc.setProtoProp.call(this, "type", value);
+    };
     v9ng.envmtImpl.HTMLMetaElement_prototype$content_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "content");
     };
@@ -1058,7 +1119,7 @@
                 callBack = function () {
                     return _callBack(batteryManager);
                 }
-                v9ng.cache.promiseEvents.push(callBack);
+                v9ng.cache.callbackFuncs.push(callBack);
             }
         }
         return obj;
@@ -1071,10 +1132,11 @@
     };
     v9ng.envmtImpl.Node_prototype$appendChild = function (tag) {
         // TODO: fix and set parentNode
-        let collection = [];
-        collection.push(tag);
-        collection = v9ng.toolsFunc.createProxyObj(collection, HTMLCollection, "HTMLCollection");
-        v9ng.toolsFunc.setProtoProp.call(this, "children", collection);
+        // let collection = [];
+        // collection.push(tag);
+        // collection = v9ng.toolsFunc.createProxyObj(collection, HTMLCollection, "HTMLCollection");
+        // v9ng.toolsFunc.setProtoProp.call(this, "children", collection);
+        this[v9ng.cache.domSymbol].appendChild(tag[v9ng.cache.domSymbol]);
         return tag;
     };
     v9ng.envmtImpl.Node_prototype$parentNode_get = function () {
@@ -1151,10 +1213,10 @@
         return program;
     };
     v9ng.envmtImpl.window$clearTimeout = function (timeoutId) {
-        for (let i = 0; i < v9ng.cache.timeoutEvents.length; i++) {
-            let event = v9ng.cache.timeoutEvents[i];
+        for (let i = 0; i < v9ng.cache.asyncEvents.length; i++) {
+            let event = v9ng.cache.asyncEvents[i];
             if (event.timeoutId === timeoutId) {
-                delete v9ng.cache.timeoutEvents[i];
+                delete v9ng.cache.asyncEvents[i];
             }
         }
     };
@@ -1173,16 +1235,16 @@
         if (typeof func !== "function") {
             type = 0; // eval code
         }
-        v9ng.cache.timeFuncCursor += 1;
+        v9ng.cache.asyncEventCursor += 1;
         let event = {
             "callback": func,
             "delay": delay,
             "args": args,
             "type": type,
-            "timeoutId": v9ng.cache.timeFuncCursor
+            "timeoutId": v9ng.cache.asyncEventCursor
         }
-        v9ng.cache.timeoutEvents.push(event);
-        return v9ng.cache.timeFuncCursor;
+        v9ng.cache.asyncEvents.push(event);
+        return v9ng.cache.asyncEventCursor;
     };
     v9ng.envmtImpl.window$top_get = function () {
         return window;
@@ -5523,6 +5585,161 @@ ${v9ng.toolsFunc.commToString(args)}`);
         },
     });
 })();
+(function () { // HTMLScriptElement
+    HTMLScriptElement = function () {
+        return v9ng.toolsFunc.throwError('TypeError', "Illegal constructor");
+    };
+    v9ng.toolsFunc.ctorGuard(HTMLScriptElement, "HTMLScriptElement");
+    Object.setPrototypeOf(HTMLScriptElement.prototype, HTMLElement.prototype);
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement, "supports", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement", "supports", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "src", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "src_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "src_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "type", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "type_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "type_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "noModule", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "noModule_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "noModule_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "charset", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "charset_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "charset_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "async", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "async_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "async_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "defer", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "defer_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "defer_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "crossOrigin", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "crossOrigin_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "crossOrigin_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "text", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "text_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "text_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "referrerPolicy", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "referrerPolicy_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "referrerPolicy_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "event", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "event_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "event_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "htmlFor", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "htmlFor_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "htmlFor_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "integrity", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "integrity_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "integrity_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "fetchPriority", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "fetchPriority_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "fetchPriority_set", arguments);
+        },
+    });
+    v9ng.toolsFunc.defineProperty(HTMLScriptElement.prototype, "blocking", {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "blocking_get", arguments);
+        },
+        set: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "HTMLScriptElement.prototype", "blocking_set", arguments);
+        },
+    });
+})();
 (function () { // HTMLSpanElement
     HTMLSpanElement = function () {
         return v9ng.toolsFunc.throwError('TypeError', 'Illegal constructor');
@@ -7679,6 +7896,12 @@ ${v9ng.toolsFunc.commToString(args)}`);
 (function () { // document
     document = {};
     Object.setPrototypeOf(document, HTMLDocument.prototype);
+    Object.defineProperty(document, v9ng.cache.domSymbol, {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: jsDocument,
+    });
     v9ng.toolsFunc.defineProperty(document, "location", {
         configurable: false,
         enumerable: true,
@@ -14894,6 +15117,7 @@ ${v9ng.toolsFunc.commToString(args)}`);
     // delete VM2_INTERNAL_STATE_DO_NOT_USE_OR_PROGRAM_WILL_FAIL;
     delete globalThis[Symbol.toStringTag];
     delete WindowProperties;
+    delete jsDocument;
     window = globalThis;
     Object.setPrototypeOf(window, Window.prototype);
     v9ng.toolsFunc.defineProperty(window, "atob", {
@@ -15145,18 +15369,18 @@ if (loadEvents !== undefined) {
         loadEvent.listener.call(loadEvent.self);
     }
 }
-for (const timeoutEvent of v9ng.cache.timeoutEvents) {
-    if (timeoutEvent === undefined) {
+for (const asyncEvent of v9ng.cache.asyncEvents) {
+    if (asyncEvent === undefined) {
         continue;
     }
-    if (timeoutEvent.type === 1) {
-        timeoutEvent.callback();
+    if (asyncEvent.type === 1) {
+        asyncEvent.callback();
     } else {
-        eval(timeoutEvent.callback);
+        eval(asyncEvent.callback);
     }
 }
-for (const promiseEvent of v9ng.cache.promiseEvents) {
-    promiseEvent();
+for (const callbackFunc of v9ng.cache.callbackFuncs) {
+    callbackFunc();
 }
 for (const mouseEvent of v9ng.cache.mouseEvents) {
     const type = mouseEvent.type;

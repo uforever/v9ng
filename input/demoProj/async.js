@@ -5,18 +5,18 @@ if (loadEvents !== undefined) {
         loadEvent.listener.call(loadEvent.self);
     }
 }
-for (const timeoutEvent of v9ng.cache.timeoutEvents) {
-    if (timeoutEvent === undefined) {
+for (const asyncEvent of v9ng.cache.asyncEvents) {
+    if (asyncEvent === undefined) {
         continue;
     }
-    if (timeoutEvent.type === 1) {
-        timeoutEvent.callback();
+    if (asyncEvent.type === 1) {
+        asyncEvent.callback();
     } else {
-        eval(timeoutEvent.callback);
+        eval(asyncEvent.callback);
     }
 }
-for (const promiseEvent of v9ng.cache.promiseEvents) {
-    promiseEvent();
+for (const callbackFunc of v9ng.cache.callbackFuncs) {
+    callbackFunc();
 }
 for (const mouseEvent of v9ng.cache.mouseEvents) {
     const type = mouseEvent.type;
