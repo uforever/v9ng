@@ -131,6 +131,14 @@
             return v9ng.toolsFunc.funcDispatch(this, "window", "onmessage_set", arguments);
         },
     });
+    v9ng.toolsFunc.defineProperty(window, "open", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: function () {
+            return v9ng.toolsFunc.funcDispatch(this, "window", "open", arguments);
+        },
+    });
     v9ng.toolsFunc.defineProperty(window, "openDatabase", {
         configurable: true,
         enumerable: true,

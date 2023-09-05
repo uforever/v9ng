@@ -52,7 +52,7 @@
         if (domObj[v9ng.cache.ptrSymbol]) {
             return domObj[v9ng.cache.ptrSymbol];
         } else {
-            return v9ng.toolsFunc.genHtmlElement(domObj);
+            return v9ng.toolsFunc.genMaskObj(domObj);
         }
     };
     v9ng.envmtImpl.Document_prototype$cookie_get = function () {
@@ -63,14 +63,18 @@
     };
     v9ng.envmtImpl.Document_prototype$createElement = function (tagName) {
         const domObj = document[v9ng.cache.domSymbol].createElement(tagName);
-        return v9ng.toolsFunc.genHtmlElement(domObj);
+        return v9ng.toolsFunc.genMaskObj(domObj);
+    };
+    v9ng.envmtImpl.Document_prototype$createExpression = function (xpathText, namespaceURLMapper) {
+        const referObj = document[v9ng.cache.domSymbol].createExpression(xpathText, namespaceURLMapper);
+        return v9ng.toolsFunc.genMaskObj(referObj);
     };
     v9ng.envmtImpl.Document_prototype$documentElement_get = function () {
         const domObj = document[v9ng.cache.domSymbol].documentElement;
         if (domObj[v9ng.cache.ptrSymbol]) {
             return domObj[v9ng.cache.ptrSymbol];
         } else {
-            return v9ng.toolsFunc.genHtmlElement(domObj);
+            return v9ng.toolsFunc.genMaskObj(domObj);
         }
     };
     v9ng.envmtImpl.Document_prototype$getElementsByTagName = function (tagName) {
@@ -80,7 +84,7 @@
             if (elementDom[v9ng.cache.ptrSymbol]) {
                 result.push(elementDom[v9ng.cache.ptrSymbol]);
             } else {
-                result.push(v9ng.toolsFunc.genHtmlElement(elementDom));
+                result.push(v9ng.toolsFunc.genMaskObj(elementDom));
             }
         }
         result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "htmlCollection");
@@ -94,7 +98,7 @@
         if (elementDom[v9ng.cache.ptrSymbol]) {
             return elementDom[v9ng.cache.ptrSymbol];
         } else {
-            return v9ng.toolsFunc.genHtmlElement(elementDom);
+            return v9ng.toolsFunc.genMaskObj(elementDom);
         }
     };
     v9ng.envmtImpl.Document_prototype$scripts_get = function () {
@@ -104,7 +108,7 @@
             if (elementDom[v9ng.cache.ptrSymbol]) {
                 result.push(elementDom[v9ng.cache.ptrSymbol]);
             } else {
-                result.push(v9ng.toolsFunc.genHtmlElement(elementDom));
+                result.push(v9ng.toolsFunc.genMaskObj(elementDom));
             }
         }
         result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "htmlCollection");
@@ -123,7 +127,7 @@
             if (childDom[v9ng.cache.ptrSymbol]) {
                 result.push(childDom[v9ng.cache.ptrSymbol]);
             } else {
-                result.push(v9ng.toolsFunc.genHtmlElement(childDom));
+                result.push(v9ng.toolsFunc.genMaskObj(childDom));
             }
         }
         result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "htmlCollection");
@@ -139,7 +143,7 @@
             if (elementDom[v9ng.cache.ptrSymbol]) {
                 result.push(elementDom[v9ng.cache.ptrSymbol]);
             } else {
-                result.push(v9ng.toolsFunc.genHtmlElement(elementDom));
+                result.push(v9ng.toolsFunc.genMaskObj(elementDom));
             }
         }
         result = v9ng.toolsFunc.createProxyObj(result, HTMLCollection, "htmlCollection");
@@ -197,36 +201,8 @@
         return this[v9ng.cache.domSymbol].search;
     };
     v9ng.envmtImpl.HTMLCanvasElement_prototype$getContext = function (type) {
-        let context = {};
-        switch (type) {
-            case "2d":
-                context = v9ng.toolsFunc.createProxyObj(context, CanvasRenderingContext2D, "canvasRenderingContext2D");
-                v9ng.toolsFunc.setProtoProp.call(context, "canvas", this);
-                v9ng.toolsFunc.setProtoProp.call(this, "type", type);
-                break;
-            case "webgl":
-                context = v9ng.toolsFunc.createProxyObj(context, WebGLRenderingContext, "webGLRenderingContext");
-                v9ng.toolsFunc.setProtoProp.call(context, "canvas", this);
-                v9ng.toolsFunc.setProtoProp.call(this, "type", type);
-                break;
-            default:
-                v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: HTMLCanvasElement_prototype$getContext("${type}")`);
-                break;
-        }
         const domObj = this[v9ng.cache.domSymbol].getContext(type);
-        Object.defineProperty(domObj, v9ng.cache.ptrSymbol, {
-            configurable: false,
-            enumerable: false,
-            writable: false,
-            value: context,
-        });
-        Object.defineProperty(context, v9ng.cache.domSymbol, {
-            configurable: false,
-            enumerable: false,
-            writable: false,
-            value: domObj,
-        });
-        return context;
+        return v9ng.toolsFunc.genMaskObj(domObj);
     };
     v9ng.envmtImpl.HTMLCanvasElement_prototype$height_set = function (value) {
         return (this[v9ng.cache.domSymbol].height = value);
@@ -267,6 +243,9 @@
     };
     v9ng.envmtImpl.HTMLElement_prototype$style_get = function () {
         return this[v9ng.cache.domSymbol].style;
+    };
+    v9ng.envmtImpl.HTMLInputElement_prototype$type_get = function () {
+        return this[v9ng.cache.domSymbol].type;
     };
     v9ng.envmtImpl.HTMLScriptElement_prototype$charset_get = function () {
         return this[v9ng.cache.domSymbol].charset;
@@ -319,14 +298,29 @@
     v9ng.envmtImpl.IDBRequest_prototype$result_get = function () {
         return v9ng.toolsFunc.getProtoProp.call(this, "result");
     };
-    v9ng.envmtImpl.location$href_get = function () {
-        return document[v9ng.cache.domSymbol].location.href;
+    v9ng.envmtImpl.location$hash_get = function () {
+        return document[v9ng.cache.domSymbol].location.hash;
+    };
+    v9ng.envmtImpl.location$host_get = function () {
+        return document[v9ng.cache.domSymbol].location.host;
     };
     v9ng.envmtImpl.location$hostname_get = function () {
         return document[v9ng.cache.domSymbol].location.hostname;
     };
     v9ng.envmtImpl.location$hostname_set = function (value) {
         return (document[v9ng.cache.domSymbol].location.hostname = value);
+    };
+    v9ng.envmtImpl.location$href_get = function () {
+        return document[v9ng.cache.domSymbol].location.href;
+    };
+    v9ng.envmtImpl.location$origin_get = function () {
+        return document[v9ng.cache.domSymbol].location.origin;
+    };
+    v9ng.envmtImpl.location$pathname_get = function () {
+        return document[v9ng.cache.domSymbol].location.pathname;
+    };
+    v9ng.envmtImpl.location$port_get = function () {
+        return document[v9ng.cache.domSymbol].location.port;
     };
     v9ng.envmtImpl.location$protocol_get = function () {
         return document[v9ng.cache.domSymbol].location.protocol;
@@ -414,6 +408,33 @@
     v9ng.envmtImpl.Node_prototype$appendChild = function (tag) {
         return this[v9ng.cache.domSymbol].appendChild(tag[v9ng.cache.domSymbol])[v9ng.cache.ptrSymbol];
     };
+    v9ng.envmtImpl.Node_prototype$firstChild_get = function () {
+        // TODO: Text Node
+        const firstChildDom = this[v9ng.cache.domSymbol].firstChild;
+        if (firstChildDom === null) {
+            return null;
+        }
+        if (firstChildDom[v9ng.cache.ptrSymbol]) {
+            return firstChildDom[v9ng.cache.ptrSymbol];
+        } else {
+            return v9ng.toolsFunc.genMaskObj(firstChildDom);
+        }
+    };
+    v9ng.envmtImpl.Node_prototype$nextSibling_get = function () {
+        // TODO: Text Node
+        const nextSiblingDom = this[v9ng.cache.domSymbol].nextSibling;
+        if (nextSiblingDom === null) {
+            return null;
+        }
+        if (nextSiblingDom[v9ng.cache.ptrSymbol]) {
+            return nextSiblingDom[v9ng.cache.ptrSymbol];
+        } else {
+            return v9ng.toolsFunc.genMaskObj(nextSiblingDom);
+        }
+    };
+    v9ng.envmtImpl.Node_prototype$nodeType_get = function () {
+        return this[v9ng.cache.domSymbol].nodeType;
+    };
     v9ng.envmtImpl.Node_prototype$parentElement_get = function () {
         const parentNodeDom = this[v9ng.cache.domSymbol].parentElement;
         if (parentNodeDom === null) {
@@ -422,7 +443,7 @@
         if (parentNodeDom[v9ng.cache.ptrSymbol]) {
             return parentNodeDom[v9ng.cache.ptrSymbol];
         } else {
-            return v9ng.toolsFunc.genHtmlElement(parentNodeDom);
+            return v9ng.toolsFunc.genMaskObj(parentNodeDom);
         }
     };
     v9ng.envmtImpl.Node_prototype$parentNode_get = function () {
@@ -433,7 +454,7 @@
         if (parentNodeDom[v9ng.cache.ptrSymbol]) {
             return parentNodeDom[v9ng.cache.ptrSymbol];
         } else {
-            return v9ng.toolsFunc.genHtmlElement(parentNodeDom);
+            return v9ng.toolsFunc.genMaskObj(parentNodeDom);
         }
     };
     v9ng.envmtImpl.Node_prototype$removeChild = function (tag) {

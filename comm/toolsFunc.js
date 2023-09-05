@@ -592,23 +592,31 @@
         };
     })();
 
-    (function () { // genHtmlElement
-        v9ng.toolsFunc.genHtmlElement = function (domObj) {
-            const elementType = Object.prototype.toString.call(domObj).match(/^\[object\s(.*)\]$/)[1];
-            const htmlElement = v9ng.toolsFunc.createProxyObj({}, globalThis[elementType], elementType);
-            Object.defineProperty(domObj, v9ng.cache.ptrSymbol, {
-                configurable: false,
-                enumerable: false,
-                writable: false,
-                value: htmlElement,
-            });
-            Object.defineProperty(htmlElement, v9ng.cache.domSymbol, {
-                configurable: false,
-                enumerable: false,
-                writable: false,
-                value: domObj,
-            });
-            return htmlElement;
+    (function () { // genMaskObj
+        v9ng.toolsFunc.genMaskObj = function (referObj) {
+            const objType = Object.prototype.toString.call(referObj).match(/^\[object\s(.*)\]$/)[1];
+            const maskObj = v9ng.toolsFunc.createProxyObj({}, globalThis[objType], objType);
+            try {
+                Object.defineProperty(referObj, v9ng.cache.ptrSymbol, {
+                    configurable: false,
+                    enumerable: false,
+                    writable: false,
+                    value: maskObj,
+                });
+            } catch (e) {
+                referObj[v9ng.cache.ptrSymbol] = maskObj;
+            }
+            try {
+                Object.defineProperty(maskObj, v9ng.cache.domSymbol, {
+                    configurable: false,
+                    enumerable: false,
+                    writable: false,
+                    value: referObj,
+                });
+            } catch (e) {
+                maskObj[v9ng.cache.domSymbol] = referObj;
+            }
+            return maskObj;
         };
     })();
 

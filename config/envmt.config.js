@@ -104,6 +104,7 @@ ${readFile("BatteryManager")}
 ${readFile("Event")}
 ${readEvents()}
 ${readFile("MouseEvent")}
+${readFile("XPathExpression")}
 ${readFile("DOMParser")}
 ${readFile("globalThis")}
 })();
