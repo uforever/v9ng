@@ -47,7 +47,6 @@ function readCode() {
     return `/* Environment Code */
 (function () {
 ${readFile("EventTarget")}
-${readFile("WindowProperties")}
 ${readFile("Window")}
 ${readFile("Screen")}
 ${readFile("ScreenOrientation")}
@@ -85,6 +84,7 @@ ${readFile("IDBOpenDBRequest")}
 ${readFile("IDBDatabase")}
 ${readFile("NetworkInformation")}
 ${readFile("HTMLCollection")}
+${readFile("HTMLAllCollection")}
 ${readFile("MimeType")}
 ${readFile("MimeTypeArray")}
 ${readFile("Plugin")}

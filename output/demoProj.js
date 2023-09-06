@@ -12,8 +12,8 @@
     v9ng.config.saveLog = true;    
     v9ng.cache.nativeSymbol = Symbol('native');
     v9ng.cache.proxySymbol = Symbol('proxy');
-    v9ng.cache.domSymbol = Symbol('dom');
-    v9ng.cache.ptrSymbol = Symbol('ptr');
+    v9ng.cache.referSymbol = Symbol('dom');
+    v9ng.cache.maskSymbol = Symbol('ptr');
     v9ng.cache.protoPropSymbol = Symbol('protoProp');
     v9ng.cache.proxyImmune = [
         v9ng.cache.proxySymbol,
@@ -26,8 +26,8 @@
         '[object HTMLMetaElement]',
     ];
     v9ng.cache.recursiveImmuneProp = [
-        v9ng.cache.domSymbol,
-        v9ng.cache.ptrSymbol,
+        v9ng.cache.referSymbol,
+        v9ng.cache.maskSymbol,
     ];
     // v9ng.cache.htmlElements = [];
     v9ng.cache.cookie = {};
@@ -883,8 +883,8 @@
                 v9ng.toolsFunc.styleLog('red', `[NOT IMPL]: Document_prototype$createElement("${tagName}")`);
                 break;
         }
-        const tagDocument = document[v9ng.cache.domSymbol].createElement(tagName);
-        Object.defineProperty(tag, v9ng.cache.domSymbol, {
+        const tagDocument = document[v9ng.cache.referSymbol].createElement(tagName);
+        Object.defineProperty(tag, v9ng.cache.referSymbol, {
             configurable: false,
             enumerable: false,
             writable: false,
@@ -1136,7 +1136,7 @@
         // collection.push(tag);
         // collection = v9ng.toolsFunc.createProxyObj(collection, HTMLCollection, "HTMLCollection");
         // v9ng.toolsFunc.setProtoProp.call(this, "children", collection);
-        this[v9ng.cache.domSymbol].appendChild(tag[v9ng.cache.domSymbol]);
+        this[v9ng.cache.referSymbol].appendChild(tag[v9ng.cache.referSymbol]);
         return tag;
     };
     v9ng.envmtImpl.Node_prototype$parentNode_get = function () {
@@ -7896,7 +7896,7 @@ ${v9ng.toolsFunc.commToString(args)}`);
 (function () { // document
     document = {};
     Object.setPrototypeOf(document, HTMLDocument.prototype);
-    Object.defineProperty(document, v9ng.cache.domSymbol, {
+    Object.defineProperty(document, v9ng.cache.referSymbol, {
         configurable: false,
         enumerable: false,
         writable: false,

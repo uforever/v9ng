@@ -1,4 +1,9 @@
 (function () { // Window
+    const WindowProperties = function () { // WindowProperties
+    };
+    v9ng.toolsFunc.ctorGuard(WindowProperties, "WindowProperties");
+    delete WindowProperties.prototype.constructor;
+    Object.setPrototypeOf(WindowProperties.prototype, EventTarget.prototype);
     Window = function () {
         return v9ng.toolsFunc.throwError('TypeError', 'Illegal constructor');
     };

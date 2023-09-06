@@ -1,0 +1,2 @@
+/* Async Code */
+document.cookie

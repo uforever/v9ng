@@ -8,13 +8,13 @@
 (function () { // document
     document = {};
     Object.setPrototypeOf(document, HTMLDocument.prototype);
-    Object.defineProperty(document, v9ng.cache.domSymbol, {
+    Object.defineProperty(document, v9ng.cache.referSymbol, {
         configurable: false,
         enumerable: false,
         writable: false,
         value: jsDocument,
     });
-    Object.defineProperty(jsDocument, v9ng.cache.ptrSymbol, {
+    Object.defineProperty(jsDocument, v9ng.cache.maskSymbol, {
         configurable: false,
         enumerable: false,
         writable: false,

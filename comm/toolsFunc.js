@@ -284,14 +284,18 @@
                     return result;
                 },
                 defineProperty: function (target, prop, descriptor) {
+                    const result = Reflect.defineProperty(target, prop, descriptor);
+                    if (v9ng.cache.proxyImmune.indexOf(prop) !== -1) {
+                        return result;
+                    }
                     try {
                         v9ng.toolsFunc.styleLog('magenta', `[SET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
 [VALUE]: \`${descriptor.value}\``);
                     } catch (e) {
                         v9ng.toolsFunc.styleLog('red', `[SET DESCRIPTOR]: \`${objName}[${prop.toString()}]\`
 [ERROR]: ${e.message}`);
-                    }
-                    return Reflect.defineProperty(target, prop, descriptor);
+                    };
+                    return result;
                 },
                 apply: function (target, thisArg, args) {
                     let result = Reflect.apply(target, thisArg, args);
@@ -596,26 +600,16 @@
         v9ng.toolsFunc.genMaskObj = function (referObj) {
             const objType = Object.prototype.toString.call(referObj).match(/^\[object\s(.*)\]$/)[1];
             const maskObj = v9ng.toolsFunc.createProxyObj({}, globalThis[objType], objType);
-            try {
-                Object.defineProperty(referObj, v9ng.cache.ptrSymbol, {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false,
-                    value: maskObj,
-                });
-            } catch (e) {
-                referObj[v9ng.cache.ptrSymbol] = maskObj;
-            }
-            try {
-                Object.defineProperty(maskObj, v9ng.cache.domSymbol, {
-                    configurable: false,
-                    enumerable: false,
-                    writable: false,
-                    value: referObj,
-                });
-            } catch (e) {
-                maskObj[v9ng.cache.domSymbol] = referObj;
-            }
+            Object.defineProperty(referObj, v9ng.cache.maskSymbol, {
+                configurable: false,
+                enumerable: false,
+                get: () => { return maskObj },
+            });
+            Object.defineProperty(maskObj, v9ng.cache.referSymbol, {
+                configurable: false,
+                enumerable: false,
+                get: () => { return referObj },
+            });
             return maskObj;
         };
     })();

@@ -11,9 +11,11 @@
     delete globalThis[Symbol.toStringTag];
     delete WindowProperties;
     delete jsDocument;
-    delete jsLocation;
+    delete undetectableObj;
+    Object.setPrototypeOf(v9ng.cache.undetectableObj, HTMLAllCollection.prototype);
     window = globalThis;
     Object.setPrototypeOf(window, Window.prototype);
+    window.__proto__ = Window.prototype;
     v9ng.toolsFunc.defineProperty(window, "atob", {
         configurable: true,
         enumerable: true,

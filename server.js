@@ -6,7 +6,7 @@ const commConfig = require("./config/comm.config.js"); // comm
 const envmtConfig = require("./config/envmt.config.js"); // envmt
 const inputConfig = require("./config/input.config.js"); // input
 
-const projName = "rs4";
+const projName = "rs5";
 const htmlFileName = `./input/${projName}/init.html`;
 const outputFileName = `./output/${projName}.js`;
 const logFileName = `./output/${projName}.log`;
@@ -23,7 +23,7 @@ let html = `<!DOCTYPE html>
     
 </body>
 </html>`;
-const url = "http://www.fangdi.com.cn/new_house/new_house.html";
+const url = "https://www.chinastock.com.cn/newsite/cgs-services/stockFinance/businessAnnc.html";
 try {
     html = fs.readFileSync(htmlFileName, "utf8");
 } catch (e) { };
@@ -35,6 +35,7 @@ const dom = new JSDOM(html, {
     storageQuota: 5_000_000,
 });
 const jsDocument = dom.window.document;
+const undetectableObj = new ldObj();
 
 fs.writeFileSync(logFileName, `---- [LOGS] ----`); // clear logs
 
@@ -89,6 +90,7 @@ const vm = new VM({
     sandbox: {
         fs,
         jsDocument,
+        undetectableObj,
     },
 });
 const script = new VMScript(runCode, debugFileName);

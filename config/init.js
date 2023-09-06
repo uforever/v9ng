@@ -10,26 +10,29 @@
     v9ng.config.printLog = false;
     v9ng.config.saveLog = false;
     v9ng.cache.fs = fs;
+    v9ng.cache.undetectableObj = undetectableObj;
     v9ng.cache.nativeSymbol = Symbol('native');
     v9ng.cache.proxySymbol = Symbol('proxy');
-    v9ng.cache.domSymbol = Symbol('dom');
-    v9ng.cache.ptrSymbol = Symbol('ptr');
+    v9ng.cache.referSymbol = Symbol('dom');
+    v9ng.cache.maskSymbol = Symbol('ptr');
     v9ng.cache.protoPropSymbol = Symbol('protoProp');
     v9ng.cache.proxyImmune = [
         "prototype",
         "eval",
+        "all",
         Symbol.toPrimitive,
         Symbol.iterator,
         v9ng.cache.nativeSymbol,
         v9ng.cache.proxySymbol,
-        v9ng.cache.domSymbol,
-        v9ng.cache.ptrSymbol,
+        v9ng.cache.referSymbol,
+        v9ng.cache.maskSymbol,
         v9ng.cache.protoPropSymbol,
     ];
     v9ng.cache.recursiveImmuneObj = [
         '[object HTMLCollection]',
         '[object WebGLBuffer]',
         '[object WebGLProgram]',
+        '[object HTMLAnchorElement]',
         '[object HTMLDivElement]',
         '[object HTMLMetaElement]',
         '[object HTMLScriptElement]',
@@ -37,8 +40,8 @@
     v9ng.cache.recursiveImmuneProp = [
         v9ng.cache.nativeSymbol,
         v9ng.cache.proxySymbol,
-        v9ng.cache.domSymbol,
-        v9ng.cache.ptrSymbol,
+        v9ng.cache.referSymbol,
+        v9ng.cache.maskSymbol,
         v9ng.cache.protoPropSymbol,
     ];
     v9ng.cache.cookie = {};
