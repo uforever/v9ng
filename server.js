@@ -8,12 +8,13 @@ const inputConfig = require("./config/input.config.js"); // input
 
 const projName = "rs5";
 const htmlFileName = `./input/${projName}/init.html`;
+const jsFileName = `./input/${projName}/external.js`;
 const outputFileName = `./output/${projName}.js`;
 const logFileName = `./output/${projName}.log`;
 const debugFileName = `./output/${projName}.dbg.js`;
 
 const { JSDOM } = jsdom;
-let html = `<!DOCTYPE html>
+let initHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -23,11 +24,15 @@ let html = `<!DOCTYPE html>
     
 </body>
 </html>`;
-const url = "https://www.chinastock.com.cn/newsite/cgs-services/stockFinance/businessAnnc.html";
 try {
-    html = fs.readFileSync(htmlFileName, "utf8");
+    initHtml = fs.readFileSync(htmlFileName, "utf8");
 } catch (e) { };
-const dom = new JSDOM(html, {
+let externalJs = '';
+try {
+    externalJs = fs.readFileSync(jsFileName, "utf8");
+} catch (e) { };
+const url = "https://www.chinastock.com.cn/newsite/cgs-services/stockFinance/businessAnnc.html?type=marginList";
+const dom = new JSDOM(initHtml, {
     url: url,
     referrer: url,
     contentType: "text/html",
@@ -91,6 +96,7 @@ const vm = new VM({
         fs,
         jsDocument,
         undetectableObj,
+        externalJs,
     },
 });
 const script = new VMScript(runCode, debugFileName);

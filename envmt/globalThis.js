@@ -7,6 +7,7 @@
     delete SharedArrayBuffer;
     delete $jsDebugIsRegistered;
     delete fs;
+    delete externalJs;
     // delete VM2_INTERNAL_STATE_DO_NOT_USE_OR_PROGRAM_WILL_FAIL;
     delete globalThis[Symbol.toStringTag];
     delete WindowProperties;

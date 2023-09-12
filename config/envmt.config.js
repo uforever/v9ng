@@ -101,6 +101,7 @@ ${readFile("WebGLProgram")}
 ${readFile("XMLHttpRequestEventTarget")}
 ${readFile("XMLHttpRequest")}
 ${readFile("BatteryManager")}
+${readFile("LockManager")}
 ${readFile("Event")}
 ${readEvents()}
 ${readFile("MouseEvent")}

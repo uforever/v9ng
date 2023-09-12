@@ -398,14 +398,14 @@
         const targetToString = function () {
             return typeof this === 'function' && this[v9ng.cache.nativeSymbol] || originToString.call(this);
         }
-        function setProp(func, key, value) {
+        const setProp = function (func, key, value) {
             Object.defineProperty(func, key, {
                 writable: true,
                 configurable: true,
                 enumerable: false,
                 value: value,
-            })
-        }
+            });
+        };
         delete Function.prototype.toString;
         setProp(Function.prototype, "toString", targetToString);
         setProp(Function.prototype.toString, v9ng.cache.nativeSymbol, "function toString() { [native code] }");
@@ -657,7 +657,7 @@
 
     (function () { // createMimeTypeArray
         v9ng.toolsFunc.createMimeTypeArray = function () {
-            const mimeTypeArray = v9ng.toolsFunc.createProxyObj({}, MimeTypeArray, "mimeTypeArray");
+            const mimeTypeArray = v9ng.toolsFunc.createProxyObj({}, MimeTypeArray, "MimeTypeArray");
             v9ng.toolsFunc.setProtoProp.call(mimeTypeArray, "length", 0);
             return mimeTypeArray;
         };
@@ -693,7 +693,7 @@
 
     (function () { // createMimeType
         v9ng.toolsFunc.createMimeType = function (mimeTypeJson, plugin) {
-            const mimeType = v9ng.toolsFunc.createProxyObj({}, MimeType, "mimeType");
+            const mimeType = v9ng.toolsFunc.createProxyObj({}, MimeType, "MimeType");
             v9ng.toolsFunc.setProtoProp.call(mimeType, "description", mimeTypeJson.description);
             v9ng.toolsFunc.setProtoProp.call(mimeType, "suffixes", mimeTypeJson.suffixes);
             v9ng.toolsFunc.setProtoProp.call(mimeType, "type", mimeTypeJson.type);
@@ -705,7 +705,7 @@
 
     (function () { // createPluginArray
         v9ng.toolsFunc.createPluginArray = function () {
-            const pluginArray = v9ng.toolsFunc.createProxyObj({}, PluginArray, "pluginArray");
+            const pluginArray = v9ng.toolsFunc.createProxyObj({}, PluginArray, "PluginArray");
             v9ng.toolsFunc.setProtoProp.call(pluginArray, "length", 0);
             return pluginArray;
         };
@@ -734,7 +734,7 @@
     (function () { // createPlugin
         v9ng.toolsFunc.createPlugin = function (data) {
             const mimeTypes = data.mimeTypes;
-            let plugin = v9ng.toolsFunc.createProxyObj({}, Plugin, "plugin");
+            let plugin = v9ng.toolsFunc.createProxyObj({}, Plugin, "Plugin");
             v9ng.toolsFunc.setProtoProp.call(plugin, "description", data.description);
             v9ng.toolsFunc.setProtoProp.call(plugin, "filename", data.filename);
             v9ng.toolsFunc.setProtoProp.call(plugin, "name", data.name);

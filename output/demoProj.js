@@ -1043,7 +1043,7 @@
     v9ng.envmtImpl.HTMLElement_prototype$style_get = function () {
         let style = v9ng.toolsFunc.getProtoProp.call(this, "style");
         if (style === undefined) {
-            style = v9ng.toolsFunc.createProxyObj({}, CSSStyleDeclaration, "style");
+            style = v9ng.toolsFunc.createProxyObj({}, CSSStyleDeclaration, "CSSStyleDeclaration");
         }
         return style;
     };

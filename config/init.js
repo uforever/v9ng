@@ -6,20 +6,22 @@
         "toolsFunc": {},
         "envmtImpl": {},
     };
-    v9ng.config.enableProxy = false;
-    v9ng.config.printLog = false;
-    v9ng.config.saveLog = false;
+    v9ng.config.enableProxy = true;
+    v9ng.config.printLog = true;
+    v9ng.config.saveLog = true;
     v9ng.cache.fs = fs;
     v9ng.cache.undetectableObj = undetectableObj;
+    v9ng.cache.externalJs = externalJs;
     v9ng.cache.nativeSymbol = Symbol('native');
     v9ng.cache.proxySymbol = Symbol('proxy');
-    v9ng.cache.referSymbol = Symbol('dom');
-    v9ng.cache.maskSymbol = Symbol('ptr');
+    v9ng.cache.referSymbol = Symbol('refer');
+    v9ng.cache.maskSymbol = Symbol('mask');
     v9ng.cache.protoPropSymbol = Symbol('protoProp');
     v9ng.cache.proxyImmune = [
         "prototype",
         "eval",
         "all",
+        "location",
         Symbol.toPrimitive,
         Symbol.iterator,
         v9ng.cache.nativeSymbol,
