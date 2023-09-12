@@ -6,9 +6,9 @@
         "toolsFunc": {},
         "envmtImpl": {},
     };
-    v9ng.config.enableProxy = true;
-    v9ng.config.printLog = true;
-    v9ng.config.saveLog = true;
+    v9ng.config.enableProxy = false;
+    v9ng.config.printLog = false;
+    v9ng.config.saveLog = false;
     v9ng.cache.fs = fs;
     v9ng.cache.undetectableObj = undetectableObj;
     v9ng.cache.externalJs = externalJs;
